@@ -1,0 +1,2 @@
+No AndroidManifest.xml da aplicação, adicionar conforme a versão do plugin/Android:
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
