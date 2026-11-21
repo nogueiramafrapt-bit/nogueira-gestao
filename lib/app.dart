@@ -131,23 +131,29 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     final name = TextEditingController(text: ingredient?.name ?? '');
     final unit = TextEditingController(text: ingredient?.unit ?? 'kg');
     final price = TextEditingController(text: ingredient?.pricePerUnit.toStringAsFixed(2) ?? '');
+    final stock = TextEditingController(text: ingredient?.stockQuantity.toString() ?? '0');
+    final minimum = TextEditingController(text: ingredient?.minimumStock.toString() ?? '0');
     final result = await showDialog<_Ingredient>(context: context, builder: (c) => AlertDialog(
       title: Text(ingredient == null ? 'Novo ingrediente' : 'Editar ingrediente'),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: name, decoration: const InputDecoration(labelText: 'Ingrediente (ex.: farinha)')),
         TextField(controller: unit, decoration: const InputDecoration(labelText: 'Unidade de compra (kg, L, un.)')),
         TextField(controller: price, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Preço por unidade (€)')),
+        TextField(controller: stock, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Stock atual')),
+        TextField(controller: minimum, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Stock mínimo')),
       ]),
       actions: [
         TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
         FilledButton(onPressed: () {
           final v = double.tryParse(price.text.trim().replaceAll(',', '.'));
-          if (name.text.trim().isEmpty || unit.text.trim().isEmpty || v == null || v < 0) return;
-          Navigator.pop(c, _Ingredient(name.text.trim(), unit.text.trim(), v));
+          final q = double.tryParse(stock.text.trim().replaceAll(',', '.'));
+          final m = double.tryParse(minimum.text.trim().replaceAll(',', '.'));
+          if (name.text.trim().isEmpty || unit.text.trim().isEmpty || v == null || v < 0 || q == null || q < 0 || m == null || m < 0) return;
+          Navigator.pop(c, _Ingredient(name.text.trim(), unit.text.trim(), v, stockQuantity: q, minimumStock: m));
         }, child: const Text('Guardar')),
       ],
     ));
-    name.dispose(); unit.dispose(); price.dispose();
+    name.dispose(); unit.dispose(); price.dispose(); stock.dispose(); minimum.dispose();
     if (result == null || !mounted) return;
     setState(() {
       if (index == null) {
@@ -220,14 +226,14 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_dashboard(), _productList(), const _PlaceholderPage(title: 'Encomendas', subtitle: 'Registo e acompanhamento de encomendas.'), const _PlaceholderPage(title: 'Clientes', subtitle: 'Ficha e contactos de clientes.'), _costPage()];
+    final pages = [_dashboard(), _productList(), const _PlaceholderPage(title: 'Encomendas', subtitle: 'Registo e acompanhamento de encomendas.'), const _PlaceholderPage(title: 'Clientes', subtitle: 'Ficha e contactos de clientes.'), _costPage(), _stockPage()];
     return Scaffold(
       appBar: AppBar(title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('NOGUEIRA GESTÃO', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
         Text('Nogueira Doces & Salgados', style: TextStyle(fontSize: 12)),
       ])),
       body: _loading ? const Center(child: CircularProgressIndicator()) : pages[_tab],
-      floatingActionButton: !_loading && (_tab == 1 || _tab == 4) ? FloatingActionButton.extended(
+      floatingActionButton: !_loading && (_tab == 1 || _tab == 4 || _tab == 5) ? FloatingActionButton.extended(
         onPressed: () => _tab == 1 ? _openProductDialog() : _openIngredientDialog(),
         icon: const Icon(Icons.add), label: Text(_tab == 1 ? 'Produto' : 'Ingrediente'),
       ) : null,
@@ -239,6 +245,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
           NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Encomendas'),
           NavigationDestination(icon: Icon(Icons.people_outline), label: 'Clientes'),
           NavigationDestination(icon: Icon(Icons.calculate_outlined), label: 'Custos'),
+          NavigationDestination(icon: Icon(Icons.warehouse_outlined), label: 'Stock'),
         ],
       ),
     );
@@ -305,6 +312,48 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     const Padding(padding: EdgeInsets.only(top: 8), child: Text('Atenção: o cálculo considera apenas os ingredientes registados. Embalagens, energia, mão de obra e desperdício devem ser acrescentados como ingredientes/custos para obter uma estimativa mais completa.', style: TextStyle(fontSize: 12, color: Colors.grey))),
   ]);
 
+
+  Future<void> _stockMovement(_Ingredient ingredient, bool entry) async {
+    final controller = TextEditingController();
+    final amount = await showDialog<double>(context: context, builder: (c) => AlertDialog(
+      title: Text(entry ? 'Entrada de stock' : 'Saída de stock'),
+      content: TextField(controller: controller, autofocus: true, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'Quantidade em ${ingredient.unit}')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
+        FilledButton(onPressed: () { final v = double.tryParse(controller.text.trim().replaceAll(',', '.')); if (v == null || v <= 0) return; Navigator.pop(c, v); }, child: Text(entry ? 'Registar entrada' : 'Registar saída')),
+      ],
+    ));
+    controller.dispose();
+    if (amount == null || !mounted) return;
+    if (!entry && amount > ingredient.stockQuantity) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stock insuficiente para esta saída.'))); return; }
+    final index = _ingredients.indexOf(ingredient);
+    if (index < 0) return;
+    setState(() { _ingredients[index] = _Ingredient(ingredient.name, ingredient.unit, ingredient.pricePerUnit, stockQuantity: ingredient.stockQuantity + (entry ? amount : -amount), minimumStock: ingredient.minimumStock); });
+    await _saveCostData();
+  }
+
+  Widget _stockPage() => ListView(padding: const EdgeInsets.all(16), children: [
+    Text('Controlo de stock', style: Theme.of(context).textTheme.titleLarge),
+    const SizedBox(height: 4),
+    const Text('Registe entradas e saídas para acompanhar as existências dos ingredientes.'),
+    const SizedBox(height: 12),
+    Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+      Column(children: [Text('${_ingredients.length}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), const Text('Ingredientes')]),
+      Column(children: [Text('${_ingredients.where((e) => e.stockQuantity <= e.minimumStock).length}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.red)), const Text('Stock baixo')]),
+    ]))),
+    if (_ingredients.isEmpty) const Padding(padding: EdgeInsets.all(20), child: Text('Adicione ingredientes na área Custos para começar.')),
+    ..._ingredients.map((e) {
+      final low = e.stockQuantity <= e.minimumStock;
+      return Card(child: ListTile(
+        leading: CircleAvatar(backgroundColor: low ? Colors.red.shade50 : Colors.green.shade50, child: Icon(low ? Icons.warning_amber_rounded : Icons.check, color: low ? Colors.red : Colors.green)),
+        title: Text(e.name),
+        subtitle: Text('Disponível: ${e.stockQuantity} ${e.unit} · Mínimo: ${e.minimumStock} ${e.unit}'),
+        trailing: PopupMenuButton<String>(onSelected: (v) { if (v == 'in') _stockMovement(e, true); if (v == 'out') _stockMovement(e, false); },
+          itemBuilder: (_) => const [PopupMenuItem(value: 'in', child: Text('Registar entrada')), PopupMenuItem(value: 'out', child: Text('Registar saída'))]),
+      ));
+    }),
+  ]);
+
   Future<void> _deleteIngredient(int index) async {
     final ingredient = _ingredients[index];
     final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
@@ -324,10 +373,10 @@ class _Product {
   factory _Product.fromJson(Map<String, dynamic> j) => _Product(j['name'] as String, (j['price'] as num).toDouble(), j['category'] as String);
 }
 class _Ingredient {
-  const _Ingredient(this.name, this.unit, this.pricePerUnit);
-  final String name; final String unit; final double pricePerUnit;
-  Map<String, dynamic> toJson() => {'name': name, 'unit': unit, 'pricePerUnit': pricePerUnit};
-  factory _Ingredient.fromJson(Map<String, dynamic> j) => _Ingredient(j['name'] as String, j['unit'] as String, (j['pricePerUnit'] as num).toDouble());
+  const _Ingredient(this.name, this.unit, this.pricePerUnit, {this.stockQuantity = 0, this.minimumStock = 0});
+  final String name; final String unit; final double pricePerUnit; final double stockQuantity; final double minimumStock;
+  Map<String, dynamic> toJson() => {'name': name, 'unit': unit, 'pricePerUnit': pricePerUnit, 'stockQuantity': stockQuantity, 'minimumStock': minimumStock};
+  factory _Ingredient.fromJson(Map<String, dynamic> j) => _Ingredient(j['name'] as String, j['unit'] as String, (j['pricePerUnit'] as num).toDouble(), stockQuantity: (j['stockQuantity'] as num? ?? 0).toDouble(), minimumStock: (j['minimumStock'] as num? ?? 0).toDouble());
 }
 class _RecipeLine {
   _RecipeLine(this.ingredient, this.quantity);
