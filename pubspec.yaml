@@ -1,7 +1,7 @@
-name: tacocontrol_pro
-description: Controle de jornada e tempos para motoristas de pesados.
+name: nogueira_gestao
+description: Gestão de produtos, custos, stock, vendas e encomendas da Nogueira Doces & Salgados.
 publish_to: "none"
-version: 3.5.2+36
+version: 1.0.0+1
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -9,25 +9,12 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_riverpod: ^2.6.1
-  drift: ^2.21.0
-  drift_flutter: ^0.2.1
-  path_provider: ^2.1.4
-  flutter_local_notifications: ^19.0.0
-  shared_preferences: ^2.5.3
-  intl: ^0.20.2
-  geolocator: ^14.0.2
-  flutter_map: ^8.3.2
-  latlong2: ^0.9.1
-  file_picker: ^10.3.3
-  crypto: ^3.0.6
-  pdf: ^3.11.1
+  flutter_localizations:
+    sdk: flutter
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  drift_dev: ^2.21.0
-  build_runner: ^2.4.13
   flutter_lints: ^5.0.0
 
 flutter:
