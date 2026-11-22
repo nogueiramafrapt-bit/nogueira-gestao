@@ -16,6 +16,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   static const _recipesKey = 'nogueira_recipes_v1';
   static const _ordersKey = 'nogueira_orders_v1';
   static const _customersKey = 'nogueira_customers_v1';
+  static const _expensesKey = 'nogueira_expenses_v1';
   int _tab = 0;
   bool _loading = true;
   List<_Product> _products = [];
@@ -23,6 +24,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   Map<String, List<_RecipeLine>> _recipes = {};
   List<_Order> _orders = [];
   List<_Customer> _customers = [];
+  List<_Expense> _expenses = [];
   String _customerSearch = '';
   String _orderSearch = '';
   DateTime? _orderFrom;
@@ -41,6 +43,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     Map<String, List<_RecipeLine>> recipes = {};
     List<_Order> orders = [];
     List<_Customer> customers = [];
+    List<_Expense> expenses = [];
     try {
       final raw = prefs.getString(_productsKey);
       if (raw != null) products = (jsonDecode(raw) as List).map((e) => _Product.fromJson(Map<String, dynamic>.from(e))).toList();
@@ -58,6 +61,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     } catch (_) {}
     try { final raw = prefs.getString(_ordersKey); if (raw != null) orders = (jsonDecode(raw) as List).map((e) => _Order.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
     try { final raw = prefs.getString(_customersKey); if (raw != null) customers = (jsonDecode(raw) as List).map((e) => _Customer.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
+    try { final raw = prefs.getString(_expensesKey); if (raw != null) expenses = (jsonDecode(raw) as List).map((e) => _Expense.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
     if (!mounted) return;
     setState(() {
       _products = products.isEmpty ? _initialProducts() : products;
@@ -65,6 +69,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       _recipes = recipes;
       _orders = orders;
       _customers = customers;
+      _expenses = expenses;
       _loading = false;
     });
     if (products.isEmpty) await _saveProducts();
@@ -87,6 +92,8 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   Future<void> _saveCustomers() async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_customersKey, jsonEncode(_customers.map((e) => e.toJson()).toList())); }
 
   Future<void> _saveOrders() async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_ordersKey, jsonEncode(_orders.map((e) => e.toJson()).toList())); }
+
+  Future<void> _saveExpenses() async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_expensesKey, jsonEncode(_expenses.map((e) => e.toJson()).toList())); }
 
   Future<void> _saveCostData() async {
     final prefs = await SharedPreferences.getInstance();
@@ -245,7 +252,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage(), _reportsPage(), _backupPage()];
+    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage(), _reportsPage(), _backupPage(), _expensesPage()];
     return Scaffold(
       appBar: AppBar(title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('NOGUEIRA GESTÃO', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
@@ -267,6 +274,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
           NavigationDestination(icon: Icon(Icons.warehouse_outlined), label: 'Stock'),
           NavigationDestination(icon: Icon(Icons.bar_chart_outlined), label: 'Relatórios'),
           NavigationDestination(icon: Icon(Icons.backup_outlined), label: 'Backup'),
+          NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: 'Despesas'),
         ],
       ),
     );
@@ -297,6 +305,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     'recipes': _recipes.map((k, v) => MapEntry(k, v.map((e) => e.toJson()).toList())),
     'orders': _orders.map((e) => e.toJson()).toList(),
     'customers': _customers.map((e) => e.toJson()).toList(),
+    'expenses': _expenses.map((e) => e.toJson()).toList(),
   };
 
   String _ordersCsv() {
@@ -352,14 +361,16 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       final recipes = recipeJson.map((k, v) => MapEntry(k, (v as List).map((e) => _RecipeLine.fromJson(Map<String, dynamic>.from(e))).toList()));
       final orders = (decoded['orders'] as List).map((e) => _Order.fromJson(Map<String, dynamic>.from(e))).toList();
       final customers = (decoded['customers'] as List).map((e) => _Customer.fromJson(Map<String, dynamic>.from(e))).toList();
+      final expenses = ((decoded['expenses'] as List?) ?? []).map((e) => _Expense.fromJson(Map<String, dynamic>.from(e))).toList();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_productsKey, jsonEncode(products.map((e) => e.toJson()).toList()));
       await prefs.setString(_ingredientsKey, jsonEncode(ingredients.map((e) => e.toJson()).toList()));
       await prefs.setString(_recipesKey, jsonEncode(recipes.map((k, v) => MapEntry(k, v.map((e) => e.toJson()).toList()))));
       await prefs.setString(_ordersKey, jsonEncode(orders.map((e) => e.toJson()).toList()));
       await prefs.setString(_customersKey, jsonEncode(customers.map((e) => e.toJson()).toList()));
+      await prefs.setString(_expensesKey, jsonEncode(expenses.map((e) => e.toJson()).toList()));
       if (!mounted) return;
-      setState(() { _products = products; _ingredients = ingredients; _recipes = recipes; _orders = orders; _customers = customers; });
+      setState(() { _products = products; _ingredients = ingredients; _recipes = recipes; _orders = orders; _customers = customers; _expenses = expenses; });
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cópia restaurada com sucesso.')));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Não foi possível restaurar: ${e is FormatException ? e.message : 'ficheiro inválido ou incompleto'}.')));
@@ -397,6 +408,76 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     const SizedBox(height: 12),
     const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Importante: depois de copiar, cole o conteúdo num ficheiro no telemóvel ou computador. Guarde a cópia num local seguro. Esta versão permite exportar, mas ainda não restaura automaticamente uma cópia.' , style: TextStyle(fontSize: 12)))),
   ]);
+
+  Future<void> _openExpenseDialog() async {
+    final description = TextEditingController();
+    final amount = TextEditingController();
+    const categories = ['Ingredientes', 'Embalagens', 'Energia/água', 'Transporte/entregas', 'Renda', 'Equipamentos', 'Marketing', 'Impostos/taxas', 'Outros'];
+    String category = categories.first;
+    DateTime date = DateTime.now();
+    final result = await showDialog<_Expense>(context: context, builder: (c) => StatefulBuilder(builder: (c, refresh) => AlertDialog(
+      title: const Text('Registar despesa'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: description, decoration: const InputDecoration(labelText: 'Descrição')),
+        TextField(controller: amount, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Valor (€)')),
+        DropdownButtonFormField<String>(value: category, decoration: const InputDecoration(labelText: 'Categoria'), items: categories.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) refresh(() => category = v); }),
+        ListTile(contentPadding: EdgeInsets.zero, title: const Text('Data da despesa'), subtitle: Text('${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}'), trailing: const Icon(Icons.calendar_month), onTap: () async { final picked = await showDatePicker(context: c, initialDate: date, firstDate: DateTime(2020), lastDate: DateTime(2100)); if (picked != null) refresh(() => date = picked); }),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
+        FilledButton(onPressed: () { final value = double.tryParse(amount.text.trim().replaceAll(',', '.')); if (description.text.trim().isEmpty || value == null || value <= 0) return; Navigator.pop(c, _Expense(description.text.trim(), category, value, date)); }, child: const Text('Guardar')),
+      ],
+    )));
+    description.dispose(); amount.dispose();
+    if (result == null || !mounted) return;
+    setState(() => _expenses.add(result));
+    await _saveExpenses();
+  }
+
+  Future<void> _deleteExpense(int index) async {
+    final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
+      title: const Text('Apagar despesa?'),
+      content: Text('Apagar "${_expenses[index].description}"?'),
+      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Apagar'))],
+    ));
+    if (ok != true || !mounted) return;
+    setState(() => _expenses.removeAt(index));
+    await _saveExpenses();
+  }
+
+  Widget _expensesPage() {
+    final sorted = [..._expenses]..sort((a, b) => b.date.compareTo(a.date));
+    final total = _expenses.fold<double>(0, (sum, e) => sum + e.amount);
+    final now = DateTime.now();
+    final month = _expenses.where((e) => e.date.year == now.year && e.date.month == now.month).fold<double>(0, (sum, e) => sum + e.amount);
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Text('Despesas e fluxo de caixa', style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 6),
+      const Text('Registe os gastos do negócio. Os dados ficam guardados neste dispositivo e entram na cópia de segurança.'),
+      const SizedBox(height: 12),
+      Row(children: [
+        Expanded(child: _reportCard('Despesas este mês', '€ ${month.toStringAsFixed(2)}', Icons.calendar_month)),
+        Expanded(child: _reportCard('Total registado', '€ ${total.toStringAsFixed(2)}', Icons.receipt_long)),
+      ]),
+      const SizedBox(height: 12),
+      FilledButton.icon(onPressed: _openExpenseDialog, icon: const Icon(Icons.add), label: const Text('Registar despesa')),
+      const SizedBox(height: 12),
+      Text('Histórico de despesas', style: Theme.of(context).textTheme.titleMedium),
+      if (sorted.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Ainda não existem despesas registadas.'))),
+      ...sorted.map((e) {
+        final originalIndex = _expenses.indexOf(e);
+        return Card(child: ListTile(
+          leading: const CircleAvatar(child: Icon(Icons.payments_outlined)),
+          title: Text(e.description),
+          subtitle: Text('${e.category} · ${e.date.day.toString().padLeft(2, '0')}/${e.date.month.toString().padLeft(2, '0')}/${e.date.year}'),
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('€ ${e.amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            IconButton(tooltip: 'Apagar', onPressed: () => _deleteExpense(originalIndex), icon: const Icon(Icons.delete_outline)),
+          ]),
+        ));
+      }),
+    ]);
+  }
 
   Widget _reportsPage() {
     final completed = _orders.where((o) => o.status == 'Concluída').toList();
@@ -780,4 +861,13 @@ class _PlaceholderPage extends StatelessWidget {
     Text(subtitle, textAlign: TextAlign.center), const SizedBox(height: 8),
     const Text('Módulo previsto para a próxima fase.', style: TextStyle(color: Colors.grey)),
   ])));
+}
+
+class _Expense {
+  _Expense(this.description, this.category, this.amount, this.date);
+  final String description, category;
+  final double amount;
+  final DateTime date;
+  Map<String, dynamic> toJson() => {'description': description, 'category': category, 'amount': amount, 'date': date.toIso8601String()};
+  factory _Expense.fromJson(Map<String, dynamic> j) => _Expense(j['description'] as String, j['category'] as String, (j['amount'] as num).toDouble(), DateTime.parse(j['date'] as String));
 }
