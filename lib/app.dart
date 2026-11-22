@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class NogueiraHomePage extends StatefulWidget {
@@ -240,7 +241,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage(), _reportsPage()];
+    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage(), _reportsPage(), _backupPage()];
     return Scaffold(
       appBar: AppBar(title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('NOGUEIRA GESTÃO', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
@@ -261,6 +262,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
           NavigationDestination(icon: Icon(Icons.calculate_outlined), label: 'Custos'),
           NavigationDestination(icon: Icon(Icons.warehouse_outlined), label: 'Stock'),
           NavigationDestination(icon: Icon(Icons.bar_chart_outlined), label: 'Relatórios'),
+          NavigationDestination(icon: Icon(Icons.backup_outlined), label: 'Backup'),
         ],
       ),
     );
@@ -281,6 +283,68 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     const _FeatureTile(icon: Icons.warehouse_outlined, title: 'Stock', subtitle: 'Ingredientes e existências'),
   ]);
 
+
+
+  Map<String, dynamic> _backupData() => {
+    'app': 'Nogueira Gestão',
+    'backup_created_at': DateTime.now().toIso8601String(),
+    'products': _products.map((e) => e.toJson()).toList(),
+    'ingredients': _ingredients.map((e) => e.toJson()).toList(),
+    'recipes': _recipes.map((k, v) => MapEntry(k, v.map((e) => e.toJson()).toList())),
+    'orders': _orders.map((e) => e.toJson()).toList(),
+    'customers': _customers.map((e) => e.toJson()).toList(),
+  };
+
+  String _ordersCsv() {
+    String cell(Object? value) => '"${(value ?? '').toString().replaceAll('"', '""')}"';
+    final rows = <List<String>>[
+      ['Data', 'Cliente', 'Telefone', 'Produto', 'Quantidade', 'Preço unitário (€)', 'Total (€)', 'Pagamento', 'Estado', 'Observações'],
+      ..._orders.map((o) => [
+        o.created.toIso8601String(), o.customer, o.phone, o.product,
+        o.quantity.toString(), o.unitPrice.toStringAsFixed(2), o.total.toStringAsFixed(2),
+        o.payment, o.status, o.notes,
+      ]),
+    ];
+    return '\uFEFF' + rows.map((r) => r.map(cell).join(';')).join('\n');
+  }
+
+  Future<void> _showCopyData(String title, String content) async {
+    await showDialog<void>(context: context, builder: (c) => AlertDialog(
+      title: Text(title),
+      content: SizedBox(width: 520, child: SingleChildScrollView(child: SelectableText(content, style: const TextStyle(fontSize: 11)))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c), child: const Text('Fechar')),
+        FilledButton.icon(onPressed: () async {
+          await Clipboard.setData(ClipboardData(text: content));
+          if (c.mounted) Navigator.pop(c);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Conteúdo copiado. Cole num ficheiro e guarde-o em segurança.')));
+        }, icon: const Icon(Icons.copy), label: const Text('Copiar')),
+      ],
+    ));
+  }
+
+  Widget _backupPage() => ListView(padding: const EdgeInsets.all(16), children: [
+    Text('Cópia de segurança e exportação', style: Theme.of(context).textTheme.titleLarge),
+    const SizedBox(height: 6),
+    const Text('Guarde uma cópia dos seus dados fora do telemóvel. Faça uma cópia regularmente.'),
+    const SizedBox(height: 14),
+    Card(child: ListTile(
+      leading: const Icon(Icons.backup_outlined, size: 30),
+      title: const Text('Cópia completa (JSON)'),
+      subtitle: const Text('Inclui produtos, ingredientes, fichas técnicas, encomendas e clientes.'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _showCopyData('Cópia de segurança completa', const JsonEncoder.withIndent('  ').convert(_backupData())),
+    )),
+    Card(child: ListTile(
+      leading: const Icon(Icons.table_chart_outlined, size: 30),
+      title: const Text('Exportar encomendas (CSV)'),
+      subtitle: const Text('Formato compatível com Excel. Inclui datas, clientes, valores e estados.'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _showCopyData('Exportação CSV para Excel', _ordersCsv()),
+    )),
+    const SizedBox(height: 12),
+    const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Importante: depois de copiar, cole o conteúdo num ficheiro no telemóvel ou computador. Guarde a cópia num local seguro. Esta versão permite exportar, mas ainda não restaura automaticamente uma cópia.' , style: TextStyle(fontSize: 12)))),
+  ]);
 
   Widget _reportsPage() {
     final completed = _orders.where((o) => o.status == 'Concluída').toList();
