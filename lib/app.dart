@@ -360,7 +360,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       Text(o.created.day.toString().padLeft(2, '0') + '/' + o.created.month.toString().padLeft(2, '0') + '/' + o.created.year.toString() + ' · ' + o.payment),
       if (o.notes.isNotEmpty) Text('Obs.: ' + o.notes),
       Row(children: [const Text('Estado: '), DropdownButton<String>(value: o.status, items: const ['Pendente','Em preparação','Concluída','Cancelada'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) _changeOrderStatus(o, v); }), const Spacer(), IconButton(onPressed: () async { setState(() => _orders.remove(o)); await _saveOrders(); }, icon: const Icon(Icons.delete_outline))]),
-    ])))))
+    ]))))
   ]);
   Future<void> _stockMovement(_Ingredient ingredient, bool entry) async {
     final controller = TextEditingController();
