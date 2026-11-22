@@ -491,25 +491,40 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   Future<void> _newOrder() async {
     if (_products.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione primeiro um produto ao catálogo.'))); return; }
-    final customer = TextEditingController(); final phone = TextEditingController(); final qty = TextEditingController(text: '1'); final notes = TextEditingController();
-    String selected = _products.first.name; String payment = 'Por pagar';
+    final customer = TextEditingController(); final phone = TextEditingController(); final notes = TextEditingController();
+    final drafts = <_DraftOrderLine>[_DraftOrderLine(_products.first.name)];
+    String payment = 'Por pagar';
     final result = await showDialog<_Order>(context: context, builder: (c) => StatefulBuilder(builder: (c, refresh) => AlertDialog(
       title: const Text('Nova encomenda'),
-      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      content: SizedBox(width: 480, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: customer, decoration: const InputDecoration(labelText: 'Nome do cliente')),
         TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Telefone / WhatsApp')),
-        DropdownButtonFormField<String>(value: selected, isExpanded: true, decoration: const InputDecoration(labelText: 'Produto'), items: _products.map((p) => DropdownMenuItem(value: p.name, child: Text(p.name + ' · €' + p.price.toStringAsFixed(2)))).toList(), onChanged: (v) { if (v != null) refresh(() => selected = v); }),
-        TextField(controller: qty, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Quantidade')),
+        const SizedBox(height: 12),
+        ...drafts.asMap().entries.map((entry) {
+          final index = entry.key; final draft = entry.value;
+          return Row(children: [
+            Expanded(child: DropdownButton<String>(isExpanded: true, value: draft.product, items: _products.map((p) => DropdownMenuItem(value: p.name, child: Text(p.name, overflow: TextOverflow.ellipsis))).toList(), onChanged: (v) { if (v != null) refresh(() => draft.product = v); })),
+            SizedBox(width: 76, child: TextField(controller: draft.quantity, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Qtd.'))),
+            IconButton(onPressed: drafts.length == 1 ? null : () => refresh(() => drafts.removeAt(index)), icon: const Icon(Icons.remove_circle_outline)),
+          ]);
+        }),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => refresh(() => drafts.add(_DraftOrderLine(_products.first.name))), icon: const Icon(Icons.add), label: const Text('Adicionar produto'))),
         DropdownButtonFormField<String>(value: payment, decoration: const InputDecoration(labelText: 'Pagamento'), items: const ['Por pagar','Dinheiro','MBWay','Transferência'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) refresh(() => payment = v); }),
         TextField(controller: notes, maxLines: 2, decoration: const InputDecoration(labelText: 'Observações')),
-      ])),
+      ]))),
       actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')), FilledButton(onPressed: () {
-        final q = double.tryParse(qty.text.trim().replaceAll(',', '.')); final p = _products.firstWhere((e) => e.name == selected);
-        if (customer.text.trim().isEmpty || q == null || q <= 0) return;
-        Navigator.pop(c, _Order(DateTime.now().millisecondsSinceEpoch.toString(), customer.text.trim(), phone.text.trim(), selected, q, p.price, payment, 'Pendente', notes.text.trim(), DateTime.now()));
+        final lines = <_OrderLine>[];
+        for (final draft in drafts) {
+          final q = double.tryParse(draft.quantity.text.trim().replaceAll(',', '.'));
+          if (q == null || q <= 0) return;
+          final product = _products.firstWhere((p) => p.name == draft.product);
+          lines.add(_OrderLine(product.name, q, product.price));
+        }
+        if (customer.text.trim().isEmpty) return;
+        Navigator.pop(c, _Order(DateTime.now().millisecondsSinceEpoch.toString(), customer.text.trim(), phone.text.trim(), lines, payment, 'Pendente', notes.text.trim(), DateTime.now()));
       }, child: const Text('Guardar encomenda'))],
     )));
-    customer.dispose(); phone.dispose(); qty.dispose(); notes.dispose();
+    customer.dispose(); phone.dispose(); notes.dispose(); for (final draft in drafts) { draft.dispose(); }
     if (result == null || !mounted) return;
     setState(() { _orders.insert(0, result); final existing = _customers.indexWhere((e) => e.name.toLowerCase() == result.customer.toLowerCase()); if (existing < 0) _customers.add(_Customer(result.customer, result.phone, '', DateTime.now())); else if (result.phone.isNotEmpty) _customers[existing].phone = result.phone; });
     await _saveOrders(); await _saveCustomers();
@@ -531,19 +546,21 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     final i = _orders.indexOf(order);
     if (i < 0 || order.status == status) return;
     if (status == 'Concluída' && !order.stockDeducted) {
-      final lines = _recipes[order.product] ?? [];
-      if (lines.isEmpty) {
+      final orderLines = order.lines;
+      if (orderLines.isEmpty || orderLines.any((item) => (_recipes[item.product] ?? []).isEmpty)) {
         setState(() => order.status = status);
         await _saveOrders();
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Encomenda concluída. Sem ficha técnica: o stock não foi descontado.')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Encomenda concluída. Falta ficha técnica em pelo menos um produto; stock não descontado.')));
         return;
       }
       final requirements = <_Ingredient, double>{};
-      for (final line in lines) {
-        final matches = _ingredients.where((e) => e.name == line.ingredient);
-        if (matches.isEmpty) continue;
-        final ingredient = matches.first;
-        requirements[ingredient] = (requirements[ingredient] ?? 0) + line.quantity * order.quantity;
+      for (final item in orderLines) {
+        for (final line in (_recipes[item.product] ?? [])) {
+          final matches = _ingredients.where((e) => e.name == line.ingredient);
+          if (matches.isEmpty) continue;
+          final ingredient = matches.first;
+          requirements[ingredient] = (requirements[ingredient] ?? 0) + line.quantity * item.quantity;
+        }
       }
       final insufficient = requirements.entries.where((e) => e.key.stockQuantity < e.value).toList();
       if (insufficient.isNotEmpty) {
@@ -577,7 +594,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     if (_orders.isEmpty) const Padding(padding: EdgeInsets.all(28), child: Center(child: Text('Ainda não existem encomendas. Toque em Nova para registar a primeira.'))),
     ..._orders.map((o) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [Expanded(child: Text(o.customer, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))), Text('€ ' + o.total.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold))]),
-      Text(o.product + ' · ' + o.quantity.toString() + ' × €' + o.unitPrice.toStringAsFixed(2)),
+      ...o.lines.map((line) => Text(line.product + ' · ' + line.quantity.toString() + ' × €' + line.unitPrice.toStringAsFixed(2))),
       if (o.phone.isNotEmpty) Text('Contacto: ' + o.phone),
       Text(o.created.day.toString().padLeft(2, '0') + '/' + o.created.month.toString().padLeft(2, '0') + '/' + o.created.year.toString() + ' · ' + o.payment),
       if (o.notes.isNotEmpty) Text('Obs.: ' + o.notes),
@@ -647,23 +664,32 @@ class _Ingredient {
   const _Ingredient(this.name, this.unit, this.pricePerUnit, {this.stockQuantity = 0, this.minimumStock = 0});
   final String name; final String unit; final double pricePerUnit; final double stockQuantity; final double minimumStock;
   Map<String, dynamic> toJson() => {'name': name, 'unit': unit, 'pricePerUnit': pricePerUnit, 'stockQuantity': stockQuantity, 'minimumStock': minimumStock};
-  factory _Ingredient.fromJson(Map<String, dynamic> j) => _Ingredient(j['name'] as String, j['unit'] as String, (j['pricePerUnit'] as num).toDouble(), stockQuantity: (j['stockQuantity'] as num? ?? 0).toDouble(), minimumStock: (j['minimumStock'] as num? ?? 0).toDouble());
+  factory _Ingredient.fromJson(Map<String, dynamic> j) => _Ingredient(j['name'] as String, j['unit'] as String, (j['pricePerUnit'] as num).toDouble(), stockQuantity: (j['stockQuantity'] as num? ?? 0).toDouble(), minimumStock: (j['minimumStock']class _DraftOrderLine {
+  _DraftOrderLine(this.product) : quantity = TextEditingController(text: '1');
+  String product; final TextEditingController quantity;
+  void dispose() => quantity.dispose();
 }
-class _RecipeLine {
-  _RecipeLine(this.ingredient, this.quantity);
-  String ingredient; double quantity;
-  Map<String, dynamic> toJson() => {'ingredient': ingredient, 'quantity': quantity};
-  factory _RecipeLine.fromJson(Map<String, dynamic> j) => _RecipeLine(j['ingredient'] as String, (j['quantity'] as num).toDouble());
-}
-class _Customer {
-  _Customer(this.name, this.phone, this.notes, this.created);
-  final String name; String phone; final String notes; final DateTime created;
-  Map<String, dynamic> toJson() => {'name': name, 'phone': phone, 'notes': notes, 'created': created.toIso8601String()};
-  factory _Customer.fromJson(Map<String, dynamic> j) => _Customer(j['name'] as String, (j['phone'] ?? '') as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String));
+class _OrderLine {
+  _OrderLine(this.product, this.quantity, this.unitPrice);
+  final String product; final double quantity, unitPrice;
+  double get total => quantity * unitPrice;
+  Map<String, dynamic> toJson() => {'product': product, 'quantity': quantity, 'unitPrice': unitPrice};
+  factory _OrderLine.fromJson(Map<String, dynamic> j) => _OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble());
 }
 class _Order {
-  _Order(this.id, this.customer, this.phone, this.product, this.quantity, this.unitPrice, this.payment, this.status, this.notes, this.created, {this.stockDeducted = false});
-  final String id, customer, phone, product; final double quantity, unitPrice; final String payment; String status; final String notes; final DateTime created; bool stockDeducted;
+  _Order(this.id, this.customer, this.phone, this.lines, this.payment, this.status, this.notes, this.created, {this.stockDeducted = false});
+  final String id, customer, phone; final List<_OrderLine> lines; final String payment; String status; final String notes; final DateTime created; bool stockDeducted;
+  String get product => lines.map((e) => e.product).join(', ');
+  double get quantity => lines.fold(0, (s, e) => s + e.quantity);
+  double get unitPrice => lines.isEmpty ? 0 : lines.first.unitPrice;
+  double get total => lines.fold(0, (s, e) => s + e.total);
+  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'lines': lines.map((e) => e.toJson()).toList(), 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted};
+  factory _Order.fromJson(Map<String, dynamic> j) {
+    final raw = j['lines'];
+    final lines = raw is List ? raw.map((e) => _OrderLine.fromJson(Map<String, dynamic>.from(e))).toList() : <_OrderLine>[_OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble())];
+    return _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, lines, j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false);
+  }
+}; final String payment; String status; final String notes; final DateTime created; bool stockDeducted;
   double get total => quantity * unitPrice;
   Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'product': product, 'quantity': quantity, 'unitPrice': unitPrice, 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted};
   factory _Order.fromJson(Map<String, dynamic> j) => _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble(), j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false);
