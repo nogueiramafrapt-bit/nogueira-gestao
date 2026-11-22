@@ -23,6 +23,10 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   Map<String, List<_RecipeLine>> _recipes = {};
   List<_Order> _orders = [];
   List<_Customer> _customers = [];
+  String _customerSearch = '';
+  String _orderSearch = '';
+  DateTime? _orderFrom;
+  DateTime? _orderTo;
 
   @override
   void initState() {
@@ -493,6 +497,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     if (_products.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione primeiro um produto ao catálogo.'))); return; }
     final customer = TextEditingController(); final phone = TextEditingController(); final notes = TextEditingController();
     final drafts = <_DraftOrderLine>[_DraftOrderLine(_products.first.name)];
+    DateTime? dueDate;
     String payment = 'Por pagar';
     final result = await showDialog<_Order>(context: context, builder: (c) => StatefulBuilder(builder: (c, refresh) => AlertDialog(
       title: const Text('Nova encomenda'),
@@ -509,6 +514,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
           ]);
         }),
         Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => refresh(() => drafts.add(_DraftOrderLine(_products.first.name))), icon: const Icon(Icons.add), label: const Text('Adicionar produto'))),
+        ListTile(contentPadding: EdgeInsets.zero, leading: const Icon(Icons.event), title: Text(dueDate == null ? 'Prazo de entrega: não definido' : 'Entrega: '+dueDate.day.toString().padLeft(2, '0')+'/'+dueDate.month.toString().padLeft(2, '0')+'/'+dueDate.year.toString()), trailing: IconButton(icon: const Icon(Icons.calendar_month), onPressed: () async { final picked = await showDatePicker(context: c, initialDate: dueDate ?? DateTime.now(), firstDate: DateTime.now().subtract(const Duration(days: 365)), lastDate: DateTime.now().add(const Duration(days: 730))); if (picked != null) refresh(() => dueDate = picked); })),
         DropdownButtonFormField<String>(value: payment, decoration: const InputDecoration(labelText: 'Pagamento'), items: const ['Por pagar','Dinheiro','MBWay','Transferência'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) refresh(() => payment = v); }),
         TextField(controller: notes, maxLines: 2, decoration: const InputDecoration(labelText: 'Observações')),
       ]))),
@@ -521,7 +527,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
           lines.add(_OrderLine(product.name, q, product.price));
         }
         if (customer.text.trim().isEmpty) return;
-        Navigator.pop(c, _Order(DateTime.now().millisecondsSinceEpoch.toString(), customer.text.trim(), phone.text.trim(), lines, payment, 'Pendente', notes.text.trim(), DateTime.now()));
+        Navigator.pop(c, _Order(DateTime.now().millisecondsSinceEpoch.toString(), customer.text.trim(), phone.text.trim(), lines, payment, 'Pendente', notes.text.trim(), DateTime.now(), dueDate: dueDate));
       }, child: const Text('Guardar encomenda'))],
     )));
     customer.dispose(); phone.dispose(); notes.dispose(); for (final draft in drafts) { draft.dispose(); }
@@ -536,11 +542,12 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     setState(() { if (index == null) { _customers.add(result); } else { _customers[index] = result; } }); await _saveCustomers();
   }
   Widget _customersPage() => ListView(padding: const EdgeInsets.all(16), children: [
+    TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Pesquisar cliente por nome ou telefone', border: OutlineInputBorder()), onChanged: (v) => setState(() => _customerSearch = v.trim().toLowerCase())),
     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text('Carteira de clientes', style: Theme.of(context).textTheme.titleLarge)), FilledButton.icon(onPressed: () => _editCustomer(), icon: const Icon(Icons.person_add_alt_1), label: const Text('Novo'))]),
     const SizedBox(height: 10),
     Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('${_customers.length} clientes registados', style: const TextStyle(fontWeight: FontWeight.bold)))),
     if (_customers.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('Os clientes serão adicionados automaticamente ao registar encomendas. Também pode adicioná-los manualmente.')),
-    ..._customers.asMap().entries.map((entry) { final i = entry.key; final customer = entry.value; return Card(child: ListTile(leading: const CircleAvatar(child: Icon(Icons.person_outline)), title: Text(customer.name), subtitle: Text([if (customer.phone.isNotEmpty) customer.phone, if (customer.notes.isNotEmpty) customer.notes].join(' · ')), trailing: PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') await _editCustomer(customer: customer, index: i); if (v == 'delete') { setState(() => _customers.removeAt(i)); await _saveCustomers(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Editar')), PopupMenuItem(value: 'delete', child: Text('Apagar'))]))); }),
+    ..._customers.asMap().entries.where((entry) => entry.value.name.toLowerCase().contains(_customerSearch) || entry.value.phone.toLowerCase().contains(_customerSearch)).map((entry) { final i = entry.key; final customer = entry.value; return Card(child: ListTile(leading: const CircleAvatar(child: Icon(Icons.person_outline)), title: Text(customer.name), subtitle: Text([if (customer.phone.isNotEmpty) customer.phone, if (customer.notes.isNotEmpty) customer.notes].join(' · ')), trailing: PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') await _editCustomer(customer: customer, index: i); if (v == 'delete') { setState(() => _customers.removeAt(i)); await _saveCustomers(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Editar')), PopupMenuItem(value: 'delete', child: Text('Apagar'))]))); }),
   ]);
   Future<void> _changeOrderStatus(_Order order, String status) async {
     final i = _orders.indexOf(order);
@@ -583,24 +590,47 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     }
     await _saveOrders();
   }
-  Widget _ordersPage() => ListView(padding: const EdgeInsets.all(16), children: [
+  Future<void> _pickOrderDate(bool from) async {
+    final picked = await showDatePicker(context: context, initialDate: (from ? _orderFrom : _orderTo) ?? DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2100));
+    if (picked != null) setState(() { if (from) { _orderFrom = picked; } else { _orderTo = picked; } });
+  }
+  Widget _ordersPage() {
+    final filtered = _orders.where((o) {
+      final q = _orderSearch.toLowerCase();
+      final matchesText = o.customer.toLowerCase().contains(q) || o.phone.toLowerCase().contains(q) || o.product.toLowerCase().contains(q);
+      final day = DateTime(o.created.year, o.created.month, o.created.day);
+      final after = _orderFrom == null || !day.isBefore(DateTime(_orderFrom!.year, _orderFrom!.month, _orderFrom!.day));
+      final before = _orderTo == null || !day.isAfter(DateTime(_orderTo!.year, _orderTo!.month, _orderTo!.day));
+      return matchesText && after && before;
+    }).toList();
+    return ListView(padding: const EdgeInsets.all(16), children: [
     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text('Encomendas e vendas', style: Theme.of(context).textTheme.titleLarge)), FilledButton.icon(onPressed: _newOrder, icon: const Icon(Icons.add), label: const Text('Nova'))]),
     const SizedBox(height: 10),
+    TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Pesquisar encomenda, cliente ou produto', border: OutlineInputBorder()), onChanged: (v) => setState(() => _orderSearch = v.trim())),
+    const SizedBox(height: 8),
+    Wrap(spacing: 8, children: [
+      OutlinedButton.icon(onPressed: () => _pickOrderDate(true), icon: const Icon(Icons.calendar_today), label: Text(_orderFrom == null ? 'De: início' : 'De: '+_orderFrom!.day.toString()+'/'+_orderFrom!.month.toString()+'/'+_orderFrom!.year.toString())),
+      OutlinedButton.icon(onPressed: () => _pickOrderDate(false), icon: const Icon(Icons.event), label: Text(_orderTo == null ? 'Até: fim' : 'Até: '+_orderTo!.day.toString()+'/'+_orderTo!.month.toString()+'/'+_orderTo!.year.toString())),
+      if (_orderFrom != null || _orderTo != null) TextButton(onPressed: () => setState(() { _orderFrom = null; _orderTo = null; }), child: const Text('Limpar datas')),
+    ]),
     Card(child: Padding(padding: const EdgeInsets.all(14), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
       Column(children: [Text(_orders.length.toString(), style: const TextStyle(fontSize: 23, fontWeight: FontWeight.bold)), const Text('Total')]),
       Column(children: [Text(_orders.where((e) => e.status == 'Pendente').length.toString(), style: const TextStyle(fontSize: 23, fontWeight: FontWeight.bold)), const Text('Pendentes')]),
       Column(children: [Text('€ ' + _orders.where((e) => e.status == 'Concluída').fold<double>(0, (sum, e) => sum + e.total).toStringAsFixed(2), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const Text('Concluído')]),
     ]))),
     if (_orders.isEmpty) const Padding(padding: EdgeInsets.all(28), child: Center(child: Text('Ainda não existem encomendas. Toque em Nova para registar a primeira.'))),
-    ..._orders.map((o) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    if (filtered.isEmpty) const Padding(padding: EdgeInsets.all(20), child: Text('Nenhuma encomenda corresponde à pesquisa ou ao período selecionado.')),
+    ...filtered.map((o) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [Expanded(child: Text(o.customer, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))), Text('€ ' + o.total.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold))]),
       ...o.lines.map((line) => Text(line.product + ' · ' + line.quantity.toString() + ' × €' + line.unitPrice.toStringAsFixed(2))),
       if (o.phone.isNotEmpty) Text('Contacto: ' + o.phone),
+      if (o.dueDate != null) Text('Prazo de entrega: '+o.dueDate!.day.toString().padLeft(2, '0')+'/'+o.dueDate!.month.toString().padLeft(2, '0')+'/'+o.dueDate!.year.toString(), style: const TextStyle(fontWeight: FontWeight.w600)),
       Text(o.created.day.toString().padLeft(2, '0') + '/' + o.created.month.toString().padLeft(2, '0') + '/' + o.created.year.toString() + ' · ' + o.payment),
       if (o.notes.isNotEmpty) Text('Obs.: ' + o.notes),
       Row(children: [const Text('Estado: '), DropdownButton<String>(value: o.status, items: const ['Pendente','Em preparação','Concluída','Cancelada'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) _changeOrderStatus(o, v); }), const Spacer(), IconButton(onPressed: () async { setState(() => _orders.remove(o)); await _saveOrders(); }, icon: const Icon(Icons.delete_outline))]),
     ]))))
   ]);
+  }
   Future<void> _stockMovement(_Ingredient ingredient, bool entry) async {
     final controller = TextEditingController();
     final amount = await showDialog<double>(context: context, builder: (c) => AlertDialog(
@@ -691,19 +721,19 @@ class _OrderLine {
   factory _OrderLine.fromJson(Map<String, dynamic> j) => _OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble());
 }
 class _Order {
-  _Order(this.id, this.customer, this.phone, this.lines, this.payment, this.status, this.notes, this.created, {this.stockDeducted = false});
-  final String id, customer, phone; final List<_OrderLine> lines; final String payment; String status; final String notes; final DateTime created; bool stockDeducted;
+  _Order(this.id, this.customer, this.phone, this.lines, this.payment, this.status, this.notes, this.created, {this.stockDeducted = false, this.dueDate});
+  final String id, customer, phone; final List<_OrderLine> lines; final String payment; String status; final String notes; final DateTime created; bool stockDeducted; final DateTime? dueDate;
   String get product => lines.map((e) => e.product).join(', ');
   double get quantity => lines.fold(0, (s, e) => s + e.quantity);
   double get unitPrice => lines.isEmpty ? 0 : lines.first.unitPrice;
   double get total => lines.fold(0, (s, e) => s + e.total);
-  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'lines': lines.map((e) => e.toJson()).toList(), 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted};
+  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'lines': lines.map((e) => e.toJson()).toList(), 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted, 'dueDate': dueDate?.toIso8601String()};
   factory _Order.fromJson(Map<String, dynamic> j) {
     final raw = j['lines'];
     final lines = raw is List
       ? raw.map((e) => _OrderLine.fromJson(Map<String, dynamic>.from(e))).toList()
       : <_OrderLine>[_OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble())];
-    return _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, lines, j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false);
+    return _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, lines, j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false, dueDate: j['dueDate'] == null ? null : DateTime.tryParse(j['dueDate'] as String));
   }
 }
 class _FeatureTile extends StatelessWidget {
