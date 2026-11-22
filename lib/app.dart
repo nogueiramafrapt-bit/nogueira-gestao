@@ -14,12 +14,14 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   static const _ingredientsKey = 'nogueira_ingredients_v1';
   static const _recipesKey = 'nogueira_recipes_v1';
   static const _ordersKey = 'nogueira_orders_v1';
+  static const _customersKey = 'nogueira_customers_v1';
   int _tab = 0;
   bool _loading = true;
   List<_Product> _products = [];
   List<_Ingredient> _ingredients = [];
   Map<String, List<_RecipeLine>> _recipes = {};
   List<_Order> _orders = [];
+  List<_Customer> _customers = [];
 
   @override
   void initState() {
@@ -33,6 +35,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     List<_Ingredient> ingredients = [];
     Map<String, List<_RecipeLine>> recipes = {};
     List<_Order> orders = [];
+    List<_Customer> customers = [];
     try {
       final raw = prefs.getString(_productsKey);
       if (raw != null) products = (jsonDecode(raw) as List).map((e) => _Product.fromJson(Map<String, dynamic>.from(e))).toList();
@@ -49,12 +52,14 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       }
     } catch (_) {}
     try { final raw = prefs.getString(_ordersKey); if (raw != null) orders = (jsonDecode(raw) as List).map((e) => _Order.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
+    try { final raw = prefs.getString(_customersKey); if (raw != null) customers = (jsonDecode(raw) as List).map((e) => _Customer.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
     if (!mounted) return;
     setState(() {
       _products = products.isEmpty ? _initialProducts() : products;
       _ingredients = ingredients;
       _recipes = recipes;
       _orders = orders;
+      _customers = customers;
       _loading = false;
     });
     if (products.isEmpty) await _saveProducts();
@@ -73,6 +78,8 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_productsKey, jsonEncode(_products.map((p) => p.toJson()).toList()));
   }
+
+  Future<void> _saveCustomers() async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_customersKey, jsonEncode(_customers.map((e) => e.toJson()).toList())); }
 
   Future<void> _saveOrders() async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_ordersKey, jsonEncode(_orders.map((e) => e.toJson()).toList())); }
 
@@ -233,7 +240,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_dashboard(), _productList(), _ordersPage(), const _PlaceholderPage(title: 'Clientes', subtitle: 'Ficha e contactos de clientes.'), _costPage(), _stockPage()];
+    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage()];
     return Scaffold(
       appBar: AppBar(title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('NOGUEIRA GESTÃO', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
@@ -341,8 +348,23 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       }, child: const Text('Guardar encomenda'))],
     )));
     customer.dispose(); phone.dispose(); qty.dispose(); notes.dispose();
-    if (result == null || !mounted) return; setState(() => _orders.insert(0, result)); await _saveOrders();
+    if (result == null || !mounted) return;
+    setState(() { _orders.insert(0, result); final existing = _customers.indexWhere((e) => e.name.toLowerCase() == result.customer.toLowerCase()); if (existing < 0) _customers.add(_Customer(result.customer, result.phone, '', DateTime.now())); else if (result.phone.isNotEmpty) _customers[existing].phone = result.phone; });
+    await _saveOrders(); await _saveCustomers();
   }
+  Future<void> _editCustomer({_Customer? customer, int? index}) async {
+    final name = TextEditingController(text: customer?.name ?? ''); final phone = TextEditingController(text: customer?.phone ?? ''); final notes = TextEditingController(text: customer?.notes ?? '');
+    final result = await showDialog<_Customer>(context: context, builder: (c) => AlertDialog(title: Text(customer == null ? 'Novo cliente' : 'Editar cliente'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [TextField(controller: name, decoration: const InputDecoration(labelText: 'Nome')), TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Telefone / WhatsApp')), TextField(controller: notes, maxLines: 3, decoration: const InputDecoration(labelText: 'Notas'))])), actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')), FilledButton(onPressed: () { if (name.text.trim().isEmpty) return; Navigator.pop(c, _Customer(name.text.trim(), phone.text.trim(), notes.text.trim(), customer?.created ?? DateTime.now())); }, child: const Text('Guardar'))]));
+    name.dispose(); phone.dispose(); notes.dispose(); if (result == null || !mounted) return;
+    setState(() { if (index == null) { _customers.add(result); } else { _customers[index] = result; } }); await _saveCustomers();
+  }
+  Widget _customersPage() => ListView(padding: const EdgeInsets.all(16), children: [
+    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text('Carteira de clientes', style: Theme.of(context).textTheme.titleLarge)), FilledButton.icon(onPressed: () => _editCustomer(), icon: const Icon(Icons.person_add_alt_1), label: const Text('Novo'))]),
+    const SizedBox(height: 10),
+    Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('${_customers.length} clientes registados', style: const TextStyle(fontWeight: FontWeight.bold)))),
+    if (_customers.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('Os clientes serão adicionados automaticamente ao registar encomendas. Também pode adicioná-los manualmente.')),
+    ..._customers.asMap().entries.map((entry) { final i = entry.key; final customer = entry.value; return Card(child: ListTile(leading: const CircleAvatar(child: Icon(Icons.person_outline)), title: Text(customer.name), subtitle: Text([if (customer.phone.isNotEmpty) customer.phone, if (customer.notes.isNotEmpty) customer.notes].join(' · ')), trailing: PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') await _editCustomer(customer: customer, index: i); if (v == 'delete') { setState(() => _customers.removeAt(i)); await _saveCustomers(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Editar')), PopupMenuItem(value: 'delete', child: Text('Apagar'))]))); }),
+  ]);
   Future<void> _changeOrderStatus(_Order order, String status) async { final i = _orders.indexOf(order); if (i < 0) return; setState(() => _orders[i].status = status); await _saveOrders(); }
   Widget _ordersPage() => ListView(padding: const EdgeInsets.all(16), children: [
     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text('Encomendas e vendas', style: Theme.of(context).textTheme.titleLarge)), FilledButton.icon(onPressed: _newOrder, icon: const Icon(Icons.add), label: const Text('Nova'))]),
@@ -432,6 +454,12 @@ class _RecipeLine {
   String ingredient; double quantity;
   Map<String, dynamic> toJson() => {'ingredient': ingredient, 'quantity': quantity};
   factory _RecipeLine.fromJson(Map<String, dynamic> j) => _RecipeLine(j['ingredient'] as String, (j['quantity'] as num).toDouble());
+}
+class _Customer {
+  _Customer(this.name, this.phone, this.notes, this.created);
+  final String name; String phone; final String notes; final DateTime created;
+  Map<String, dynamic> toJson() => {'name': name, 'phone': phone, 'notes': notes, 'created': created.toIso8601String()};
+  factory _Customer.fromJson(Map<String, dynamic> j) => _Customer(j['name'] as String, (j['phone'] ?? '') as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String));
 }
 class _Order {
   _Order(this.id, this.customer, this.phone, this.product, this.quantity, this.unitPrice, this.payment, this.status, this.notes, this.created);
