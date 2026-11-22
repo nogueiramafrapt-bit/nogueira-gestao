@@ -13,11 +13,13 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   static const _productsKey = 'nogueira_products_v1';
   static const _ingredientsKey = 'nogueira_ingredients_v1';
   static const _recipesKey = 'nogueira_recipes_v1';
+  static const _ordersKey = 'nogueira_orders_v1';
   int _tab = 0;
   bool _loading = true;
   List<_Product> _products = [];
   List<_Ingredient> _ingredients = [];
   Map<String, List<_RecipeLine>> _recipes = {};
+  List<_Order> _orders = [];
 
   @override
   void initState() {
@@ -30,6 +32,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     List<_Product> products = [];
     List<_Ingredient> ingredients = [];
     Map<String, List<_RecipeLine>> recipes = {};
+    List<_Order> orders = [];
     try {
       final raw = prefs.getString(_productsKey);
       if (raw != null) products = (jsonDecode(raw) as List).map((e) => _Product.fromJson(Map<String, dynamic>.from(e))).toList();
@@ -45,11 +48,13 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
         recipes = decoded.map((key, value) => MapEntry(key, (value as List).map((e) => _RecipeLine.fromJson(Map<String, dynamic>.from(e))).toList()));
       }
     } catch (_) {}
+    try { final raw = prefs.getString(_ordersKey); if (raw != null) orders = (jsonDecode(raw) as List).map((e) => _Order.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
     if (!mounted) return;
     setState(() {
       _products = products.isEmpty ? _initialProducts() : products;
       _ingredients = ingredients;
       _recipes = recipes;
+      _orders = orders;
       _loading = false;
     });
     if (products.isEmpty) await _saveProducts();
@@ -68,6 +73,8 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_productsKey, jsonEncode(_products.map((p) => p.toJson()).toList()));
   }
+
+  Future<void> _saveOrders() async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_ordersKey, jsonEncode(_orders.map((e) => e.toJson()).toList())); }
 
   Future<void> _saveCostData() async {
     final prefs = await SharedPreferences.getInstance();
@@ -226,7 +233,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_dashboard(), _productList(), const _PlaceholderPage(title: 'Encomendas', subtitle: 'Registo e acompanhamento de encomendas.'), const _PlaceholderPage(title: 'Clientes', subtitle: 'Ficha e contactos de clientes.'), _costPage(), _stockPage()];
+    final pages = [_dashboard(), _productList(), _ordersPage(), const _PlaceholderPage(title: 'Clientes', subtitle: 'Ficha e contactos de clientes.'), _costPage(), _stockPage()];
     return Scaffold(
       appBar: AppBar(title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('NOGUEIRA GESTÃO', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
@@ -313,6 +320,48 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   ]);
 
 
+  Future<void> _newOrder() async {
+    if (_products.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione primeiro um produto ao catálogo.'))); return; }
+    final customer = TextEditingController(); final phone = TextEditingController(); final qty = TextEditingController(text: '1'); final notes = TextEditingController();
+    String selected = _products.first.name; String payment = 'Por pagar';
+    final result = await showDialog<_Order>(context: context, builder: (c) => StatefulBuilder(builder: (c, refresh) => AlertDialog(
+      title: const Text('Nova encomenda'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: customer, decoration: const InputDecoration(labelText: 'Nome do cliente')),
+        TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Telefone / WhatsApp')),
+        DropdownButtonFormField<String>(value: selected, isExpanded: true, decoration: const InputDecoration(labelText: 'Produto'), items: _products.map((p) => DropdownMenuItem(value: p.name, child: Text(p.name + ' · €' + p.price.toStringAsFixed(2)))).toList(), onChanged: (v) { if (v != null) refresh(() => selected = v); }),
+        TextField(controller: qty, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Quantidade')),
+        DropdownButtonFormField<String>(value: payment, decoration: const InputDecoration(labelText: 'Pagamento'), items: const ['Por pagar','Dinheiro','MBWay','Transferência'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) refresh(() => payment = v); }),
+        TextField(controller: notes, maxLines: 2, decoration: const InputDecoration(labelText: 'Observações')),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')), FilledButton(onPressed: () {
+        final q = double.tryParse(qty.text.trim().replaceAll(',', '.')); final p = _products.firstWhere((e) => e.name == selected);
+        if (customer.text.trim().isEmpty || q == null || q <= 0) return;
+        Navigator.pop(c, _Order(DateTime.now().millisecondsSinceEpoch.toString(), customer.text.trim(), phone.text.trim(), selected, q, p.price, payment, 'Pendente', notes.text.trim(), DateTime.now()));
+      }, child: const Text('Guardar encomenda'))],
+    )));
+    customer.dispose(); phone.dispose(); qty.dispose(); notes.dispose();
+    if (result == null || !mounted) return; setState(() => _orders.insert(0, result)); await _saveOrders();
+  }
+  Future<void> _changeOrderStatus(_Order order, String status) async { final i = _orders.indexOf(order); if (i < 0) return; setState(() => _orders[i].status = status); await _saveOrders(); }
+  Widget _ordersPage() => ListView(padding: const EdgeInsets.all(16), children: [
+    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text('Encomendas e vendas', style: Theme.of(context).textTheme.titleLarge)), FilledButton.icon(onPressed: _newOrder, icon: const Icon(Icons.add), label: const Text('Nova'))]),
+    const SizedBox(height: 10),
+    Card(child: Padding(padding: const EdgeInsets.all(14), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+      Column(children: [Text(_orders.length.toString(), style: const TextStyle(fontSize: 23, fontWeight: FontWeight.bold)), const Text('Total')]),
+      Column(children: [Text(_orders.where((e) => e.status == 'Pendente').length.toString(), style: const TextStyle(fontSize: 23, fontWeight: FontWeight.bold)), const Text('Pendentes')]),
+      Column(children: [Text('€ ' + _orders.where((e) => e.status == 'Concluída').fold<double>(0, (sum, e) => sum + e.total).toStringAsFixed(2), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const Text('Concluído')]),
+    ]))),
+    if (_orders.isEmpty) const Padding(padding: EdgeInsets.all(28), child: Center(child: Text('Ainda não existem encomendas. Toque em Nova para registar a primeira.'))),
+    ..._orders.map((o) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [Expanded(child: Text(o.customer, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))), Text('€ ' + o.total.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold))]),
+      Text(o.product + ' · ' + o.quantity.toString() + ' × €' + o.unitPrice.toStringAsFixed(2)),
+      if (o.phone.isNotEmpty) Text('Contacto: ' + o.phone),
+      Text(o.created.day.toString().padLeft(2, '0') + '/' + o.created.month.toString().padLeft(2, '0') + '/' + o.created.year.toString() + ' · ' + o.payment),
+      if (o.notes.isNotEmpty) Text('Obs.: ' + o.notes),
+      Row(children: [const Text('Estado: '), DropdownButton<String>(value: o.status, items: const ['Pendente','Em preparação','Concluída','Cancelada'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) _changeOrderStatus(o, v); }), const Spacer(), IconButton(onPressed: () async { setState(() => _orders.remove(o)); await _saveOrders(); }, icon: const Icon(Icons.delete_outline))]),
+    ])))))
+  ]);
   Future<void> _stockMovement(_Ingredient ingredient, bool entry) async {
     final controller = TextEditingController();
     final amount = await showDialog<double>(context: context, builder: (c) => AlertDialog(
@@ -383,6 +432,13 @@ class _RecipeLine {
   String ingredient; double quantity;
   Map<String, dynamic> toJson() => {'ingredient': ingredient, 'quantity': quantity};
   factory _RecipeLine.fromJson(Map<String, dynamic> j) => _RecipeLine(j['ingredient'] as String, (j['quantity'] as num).toDouble());
+}
+class _Order {
+  _Order(this.id, this.customer, this.phone, this.product, this.quantity, this.unitPrice, this.payment, this.status, this.notes, this.created);
+  final String id, customer, phone, product; final double quantity, unitPrice; final String payment; String status; final String notes; final DateTime created;
+  double get total => quantity * unitPrice;
+  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'product': product, 'quantity': quantity, 'unitPrice': unitPrice, 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String()};
+  factory _Order.fromJson(Map<String, dynamic> j) => _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble(), j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String));
 }
 class _FeatureTile extends StatelessWidget {
   const _FeatureTile({required this.icon, required this.title, required this.subtitle});
