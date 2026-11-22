@@ -323,6 +323,47 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     ));
   }
 
+
+  Future<void> _restoreBackup() async {
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
+      title: const Text('Restaurar cópia de segurança'),
+      content: SizedBox(width: 520, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Cole abaixo o conteúdo JSON de uma cópia criada pela aplicação. Os dados atuais serão substituídos.'),
+        const SizedBox(height: 10),
+        TextField(controller: controller, minLines: 5, maxLines: 10, decoration: const InputDecoration(border: OutlineInputBorder(), hintText: 'Cole aqui o JSON do backup')),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Validar e restaurar')),
+      ],
+    ));
+    if (confirmed != true || !mounted) { controller.dispose(); return; }
+    try {
+      final decoded = Map<String, dynamic>.from(jsonDecode(controller.text));
+      if (decoded['app'] != 'Nogueira Gestão') throw const FormatException('Este ficheiro não é uma cópia da Nogueira Gestão.');
+      final products = (decoded['products'] as List).map((e) => _Product.fromJson(Map<String, dynamic>.from(e))).toList();
+      final ingredients = (decoded['ingredients'] as List).map((e) => _Ingredient.fromJson(Map<String, dynamic>.from(e))).toList();
+      final recipeJson = Map<String, dynamic>.from(decoded['recipes']);
+      final recipes = recipeJson.map((k, v) => MapEntry(k, (v as List).map((e) => _RecipeLine.fromJson(Map<String, dynamic>.from(e))).toList()));
+      final orders = (decoded['orders'] as List).map((e) => _Order.fromJson(Map<String, dynamic>.from(e))).toList();
+      final customers = (decoded['customers'] as List).map((e) => _Customer.fromJson(Map<String, dynamic>.from(e))).toList();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_productsKey, jsonEncode(products.map((e) => e.toJson()).toList()));
+      await prefs.setString(_ingredientsKey, jsonEncode(ingredients.map((e) => e.toJson()).toList()));
+      await prefs.setString(_recipesKey, jsonEncode(recipes.map((k, v) => MapEntry(k, v.map((e) => e.toJson()).toList()))));
+      await prefs.setString(_ordersKey, jsonEncode(orders.map((e) => e.toJson()).toList()));
+      await prefs.setString(_customersKey, jsonEncode(customers.map((e) => e.toJson()).toList()));
+      if (!mounted) return;
+      setState(() { _products = products; _ingredients = ingredients; _recipes = recipes; _orders = orders; _customers = customers; });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cópia restaurada com sucesso.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Não foi possível restaurar: ${e is FormatException ? e.message : 'ficheiro inválido ou incompleto'}.')));
+    } finally {
+      controller.dispose();
+    }
+  }
+
   Widget _backupPage() => ListView(padding: const EdgeInsets.all(16), children: [
     Text('Cópia de segurança e exportação', style: Theme.of(context).textTheme.titleLarge),
     const SizedBox(height: 6),
@@ -334,6 +375,13 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       subtitle: const Text('Inclui produtos, ingredientes, fichas técnicas, encomendas e clientes.'),
       trailing: const Icon(Icons.chevron_right),
       onTap: () => _showCopyData('Cópia de segurança completa', const JsonEncoder.withIndent('  ').convert(_backupData())),
+    )),
+    Card(child: ListTile(
+      leading: const Icon(Icons.settings_backup_restore, size: 30),
+      title: const Text('Restaurar cópia JSON'),
+      subtitle: const Text('Cole uma cópia anterior para recuperar todos os registos. Substitui os dados atuais.'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: _restoreBackup,
     )),
     Card(child: ListTile(
       leading: const Icon(Icons.table_chart_outlined, size: 30),
