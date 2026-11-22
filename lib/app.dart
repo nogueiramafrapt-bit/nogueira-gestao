@@ -321,6 +321,17 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     return '\uFEFF' + rows.map((r) => r.map(cell).join(';')).join('\n');
   }
 
+  String _expensesCsv() {
+    String cell(Object? value) => '"${(value ?? '').toString().replaceAll('"', '""')}"';
+    final rows = <List<String>>[
+      ['Data', 'Descrição', 'Categoria', 'Valor (€)'],
+      ..._expenses.map((e) => [
+        e.date.toIso8601String(), e.description, e.category, e.amount.toStringAsFixed(2),
+      ]),
+    ];
+    return '\uFEFF' + rows.map((r) => r.map(cell).join(';')).join('\n');
+  }
+
   Future<void> _showCopyData(String title, String content) async {
     await showDialog<void>(context: context, builder: (c) => AlertDialog(
       title: Text(title),
@@ -387,7 +398,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     Card(child: ListTile(
       leading: const Icon(Icons.backup_outlined, size: 30),
       title: const Text('Cópia completa (JSON)'),
-      subtitle: const Text('Inclui produtos, ingredientes, fichas técnicas, encomendas e clientes.'),
+      subtitle: const Text('Inclui produtos, ingredientes, fichas técnicas, encomendas, clientes e despesas.'),
       trailing: const Icon(Icons.chevron_right),
       onTap: () => _showCopyData('Cópia de segurança completa', const JsonEncoder.withIndent('  ').convert(_backupData())),
     )),
@@ -403,10 +414,17 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       title: const Text('Exportar encomendas (CSV)'),
       subtitle: const Text('Formato compatível com Excel. Inclui datas, clientes, valores e estados.'),
       trailing: const Icon(Icons.chevron_right),
-      onTap: () => _showCopyData('Exportação CSV para Excel', _ordersCsv()),
+      onTap: () => _showCopyData('Exportação de encomendas (CSV)', _ordersCsv()),
+    )),
+    Card(child: ListTile(
+      leading: const Icon(Icons.payments_outlined, size: 30),
+      title: const Text('Exportar despesas (CSV)'),
+      subtitle: const Text('Datas, descrição, categoria e valor para Excel.'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _showCopyData('Exportação de despesas (CSV)', _expensesCsv()),
     )),
     const SizedBox(height: 12),
-    const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Importante: depois de copiar, cole o conteúdo num ficheiro no telemóvel ou computador. Guarde a cópia num local seguro. Esta versão permite exportar, mas ainda não restaura automaticamente uma cópia.' , style: TextStyle(fontSize: 12)))),
+    const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Importante: copie o conteúdo e cole num ficheiro para guardar no telemóvel ou computador. A restauração da cópia JSON substitui os dados atuais. Faça backups regularmente e guarde-os num local seguro.', style: TextStyle(fontSize: 12)))),
   ]);
 
   Future<void> _openExpenseDialog() async {
