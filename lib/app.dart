@@ -404,10 +404,29 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     final cancelled = _orders.where((o) => o.status == 'Cancelada').toList();
     final now = DateTime.now();
     final monthOrders = completed.where((o) => o.created.year == now.year && o.created.month == now.month).toList();
-    final revenue = completed.fold<double>(0, (s, o) => s + o.total);
-    final monthRevenue = monthOrders.fold<double>(0, (s, o) => s + o.total);
-    final pendingValue = pending.fold<double>(0, (s, o) => s + o.total);
-    final productNames = completed.map((o) => o.product).toSet().toList()..sort();
+    final revenue = completed.fold<double>(0, (sum, o) => sum + o.total);
+    final monthRevenue = monthOrders.fold<double>(0, (sum, o) => sum + o.total);
+    final pendingValue = pending.fold<double>(0, (sum, o) => sum + o.total);
+    final quantities = <String, double>{};
+    final sales = <String, double>{};
+    final costs = <String, double>{};
+    final missingRecipes = <String>{};
+    for (final order in completed) {
+      for (final line in order.lines) {
+        quantities[line.product] = (quantities[line.product] ?? 0) + line.quantity;
+        sales[line.product] = (sales[line.product] ?? 0) + line.total;
+        final product = _products.where((p) => p.name == line.product).firstOrNull;
+        final recipe = _recipes[line.product] ?? [];
+        if (product == null || recipe.isEmpty) {
+          missingRecipes.add(line.product);
+        } else {
+          costs[line.product] = (costs[line.product] ?? 0) + _costFor(product) * line.quantity;
+        }
+      }
+    }
+    final productNames = quantities.keys.toList()..sort();
+    final estimatedCost = costs.values.fold<double>(0, (sum, value) => sum + value);
+    final estimatedProfit = revenue - estimatedCost;
     return ListView(padding: const EdgeInsets.all(16), children: [
       Text('Relatórios', style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 4),
@@ -416,18 +435,26 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), childAspectRatio: 1.65, crossAxisSpacing: 8, mainAxisSpacing: 8, children: [
         _reportCard('Vendas concluídas', '€ ${revenue.toStringAsFixed(2)}', Icons.euro),
         _reportCard('Este mês', '€ ${monthRevenue.toStringAsFixed(2)}', Icons.calendar_month),
+        _reportCard('Lucro bruto estimado', '€ ${estimatedProfit.toStringAsFixed(2)}', Icons.trending_up),
+        _reportCard('Custo estimado', '€ ${estimatedCost.toStringAsFixed(2)}', Icons.calculate_outlined),
         _reportCard('Por concluir', '€ ${pendingValue.toStringAsFixed(2)}', Icons.pending_actions),
         _reportCard('Encomendas concluídas', completed.length.toString(), Icons.check_circle_outline),
       ]),
       const SizedBox(height: 18),
-      Text('Vendas por produto', style: Theme.of(context).textTheme.titleMedium),
+      Text('Vendas e lucro por produto', style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 6),
       if (completed.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Ainda não há vendas concluídas para apresentar.'))),
       ...productNames.map((name) {
-        final items = completed.where((o) => o.product == name).toList();
-        final qty = items.fold<double>(0, (s, o) => s + o.quantity);
-        final total = items.fold<double>(0, (s, o) => s + o.total);
-        return Card(child: ListTile(title: Text(name), subtitle: Text('${qty.toStringAsFixed(0)} unidade(s) vendida(s)'), trailing: Text('€ ${total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold))));
+        final qty = quantities[name] ?? 0;
+        final total = sales[name] ?? 0;
+        final cost = costs[name];
+        final profit = cost == null ? null : total - cost;
+        final margin = profit == null || total <= 0 ? null : profit / total * 100;
+        return Card(child: ListTile(
+          title: Text(name),
+          subtitle: Text('${qty.toStringAsFixed(2)} unidade(s) · Custo: ${cost == null ? 'sem ficha técnica' : '€ ${cost.toStringAsFixed(2)}'}${margin == null ? '' : ' · Margem bruta: ${margin.toStringAsFixed(1)}%'}'),
+          trailing: Text('€ ${total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+        ));
       }),
       const SizedBox(height: 18),
       Text('Estado das encomendas', style: Theme.of(context).textTheme.titleMedium),
@@ -435,7 +462,8 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
         ListTile(title: const Text('Pendentes / em preparação'), trailing: Text('${pending.length} · € ${pendingValue.toStringAsFixed(2)}')),
         ListTile(title: const Text('Canceladas'), trailing: Text(cancelled.length.toString())),
       ])),
-      const Padding(padding: EdgeInsets.only(top: 8), child: Text('Nota: a rentabilidade detalhada será estimada após integrar os custos das fichas técnicas em cada venda. Os valores acima são vendas brutas e não lucro líquido.', style: TextStyle(fontSize: 12, color: Colors.grey))),
+      const Padding(padding: EdgeInsets.only(top: 8), child: Text('Estimativa de lucro bruto: vendas concluídas menos o custo dos ingredientes das fichas técnicas atuais. Não inclui mão de obra, energia, embalagens, entregas, impostos ou outros custos. Produtos sem ficha técnica não entram no custo estimado.', style: TextStyle(fontSize: 12, color: Colors.grey))),
+      if (missingRecipes.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Fichas técnicas em falta: ${missingRecipes.join(', ')}', style: const TextStyle(fontSize: 12, color: Colors.deepOrange))),
     ]);
   }
 
