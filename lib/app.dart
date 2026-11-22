@@ -415,7 +415,45 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     if (_customers.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('Os clientes serão adicionados automaticamente ao registar encomendas. Também pode adicioná-los manualmente.')),
     ..._customers.asMap().entries.map((entry) { final i = entry.key; final customer = entry.value; return Card(child: ListTile(leading: const CircleAvatar(child: Icon(Icons.person_outline)), title: Text(customer.name), subtitle: Text([if (customer.phone.isNotEmpty) customer.phone, if (customer.notes.isNotEmpty) customer.notes].join(' · ')), trailing: PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') await _editCustomer(customer: customer, index: i); if (v == 'delete') { setState(() => _customers.removeAt(i)); await _saveCustomers(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Editar')), PopupMenuItem(value: 'delete', child: Text('Apagar'))]))); }),
   ]);
-  Future<void> _changeOrderStatus(_Order order, String status) async { final i = _orders.indexOf(order); if (i < 0) return; setState(() => _orders[i].status = status); await _saveOrders(); }
+  Future<void> _changeOrderStatus(_Order order, String status) async {
+    final i = _orders.indexOf(order);
+    if (i < 0 || order.status == status) return;
+    if (status == 'Concluída' && !order.stockDeducted) {
+      final lines = _recipes[order.product] ?? [];
+      if (lines.isEmpty) {
+        setState(() => order.status = status);
+        await _saveOrders();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Encomenda concluída. Sem ficha técnica: o stock não foi descontado.')));
+        return;
+      }
+      final requirements = <_Ingredient, double>{};
+      for (final line in lines) {
+        final matches = _ingredients.where((e) => e.name == line.ingredient);
+        if (matches.isEmpty) continue;
+        final ingredient = matches.first;
+        requirements[ingredient] = (requirements[ingredient] ?? 0) + line.quantity * order.quantity;
+      }
+      final insufficient = requirements.entries.where((e) => e.key.stockQuantity < e.value).toList();
+      if (insufficient.isNotEmpty) {
+        final details = insufficient.map((e) => '${e.key.name}: disponível ${e.key.stockQuantity} ${e.key.unit}, necessário ${e.value} ${e.key.unit}').join('; ');
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Stock insuficiente. ${details}')));
+        return;
+      }
+      setState(() {
+        for (final entry in requirements.entries) {
+          final ingredient = entry.key;
+          final idx = _ingredients.indexOf(ingredient);
+          _ingredients[idx] = _Ingredient(ingredient.name, ingredient.unit, ingredient.pricePerUnit, stockQuantity: ingredient.stockQuantity - entry.value, minimumStock: ingredient.minimumStock);
+        }
+        order.stockDeducted = true;
+        order.status = status;
+      });
+      await _saveCostData();
+    } else {
+      setState(() => order.status = status);
+    }
+    await _saveOrders();
+  }
   Widget _ordersPage() => ListView(padding: const EdgeInsets.all(16), children: [
     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text('Encomendas e vendas', style: Theme.of(context).textTheme.titleLarge)), FilledButton.icon(onPressed: _newOrder, icon: const Icon(Icons.add), label: const Text('Nova'))]),
     const SizedBox(height: 10),
@@ -506,10 +544,10 @@ class _RecipeLine {
   factory _RecipeLine.fromJson(Map<String, dynamic> j) => _RecipeLine(j['ingredient'] as String, (j['quantity'] as num).toDouble());
 }
 class _Customer {
-  _Customer(this.name, this.phone, this.notes, this.created);
-  final String name; String phone; final String notes; final DateTime created;
-  Map<String, dynamic> toJson() => {'name': name, 'phone': phone, 'notes': notes, 'created': created.toIso8601String()};
-  factory _Customer.fromJson(Map<String, dynamic> j) => _Customer(j['name'] as String, (j['phone'] ?? '') as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String));
+  _Customer(this.name, this.phone, this.notes, this.created, {this.stockDeducted = false});
+  final String name; String phone; final String notes; final DateTime created; bool stockDeducted;
+  Map<String, dynamic> toJson() => {'name': name, 'phone': phone, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted};
+  factory _Customer.fromJson(Map<String, dynamic> j) => _Customer(j['name'] as String, (j['phone'] ?? '') as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false);
 }
 class _Order {
   _Order(this.id, this.customer, this.phone, this.product, this.quantity, this.unitPrice, this.payment, this.status, this.notes, this.created);
