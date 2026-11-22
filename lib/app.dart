@@ -508,6 +508,18 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     final productNames = quantities.keys.toList()..sort();
     final estimatedCost = costs.values.fold<double>(0, (sum, value) => sum + value);
     final estimatedProfit = revenue - estimatedCost;
+    final operatingExpenses = _expenses.fold<double>(0, (sum, e) => sum + e.amount);
+    final monthExpenses = _expenses.where((e) => e.date.year == now.year && e.date.month == now.month).fold<double>(0, (sum, e) => sum + e.amount);
+    final estimatedNet = estimatedProfit - operatingExpenses;
+    final estimatedMonthCost = monthOrders.fold<double>(0, (sum, order) {
+      for (final line in order.lines) {
+        final product = _products.where((p) => p.name == line.product).firstOrNull;
+        if (product != null && (_recipes[line.product] ?? []).isNotEmpty) sum += _costFor(product) * line.quantity;
+      }
+      return sum;
+    });
+    final estimatedMonthGross = monthRevenue - estimatedMonthCost;
+    final estimatedMonthNet = estimatedMonthGross - monthExpenses;
     return ListView(padding: const EdgeInsets.all(16), children: [
       Text('Relatórios', style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 4),
@@ -517,6 +529,10 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
         _reportCard('Vendas concluídas', '€ ${revenue.toStringAsFixed(2)}', Icons.euro),
         _reportCard('Este mês', '€ ${monthRevenue.toStringAsFixed(2)}', Icons.calendar_month),
         _reportCard('Lucro bruto estimado', '€ ${estimatedProfit.toStringAsFixed(2)}', Icons.trending_up),
+        _reportCard('Despesas registadas', '€ ${operatingExpenses.toStringAsFixed(2)}', Icons.receipt_long),
+        _reportCard('Lucro líquido estimado', '€ ${estimatedNet.toStringAsFixed(2)}', Icons.account_balance_wallet_outlined),
+        _reportCard('Despesas este mês', '€ ${monthExpenses.toStringAsFixed(2)}', Icons.calendar_month),
+        _reportCard('Lucro líquido este mês*', '€ ${estimatedMonthNet.toStringAsFixed(2)}', Icons.date_range),
         _reportCard('Custo estimado', '€ ${estimatedCost.toStringAsFixed(2)}', Icons.calculate_outlined),
         _reportCard('Por concluir', '€ ${pendingValue.toStringAsFixed(2)}', Icons.pending_actions),
         _reportCard('Encomendas concluídas', completed.length.toString(), Icons.check_circle_outline),
@@ -543,7 +559,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
         ListTile(title: const Text('Pendentes / em preparação'), trailing: Text('${pending.length} · € ${pendingValue.toStringAsFixed(2)}')),
         ListTile(title: const Text('Canceladas'), trailing: Text(cancelled.length.toString())),
       ])),
-      const Padding(padding: EdgeInsets.only(top: 8), child: Text('Estimativa de lucro bruto: vendas concluídas menos o custo dos ingredientes das fichas técnicas atuais. Não inclui mão de obra, energia, embalagens, entregas, impostos ou outros custos. Produtos sem ficha técnica não entram no custo estimado.', style: TextStyle(fontSize: 12, color: Colors.grey))),
+      Padding(padding: const EdgeInsets.only(top: 8), child: Text('Lucro líquido estimado = lucro bruto estimado menos todas as despesas registadas. Resultado mensal* = vendas concluídas do mês menos custo estimado dos ingredientes com ficha técnica e despesas registadas nesse mês. Não inclui custos não registados. Produtos sem ficha técnica não entram no custo estimado; valores não substituem a contabilidade oficial.', style: TextStyle(fontSize: 12, color: Colors.grey))),
       if (missingRecipes.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Fichas técnicas em falta: ${missingRecipes.join(', ')}', style: const TextStyle(fontSize: 12, color: Colors.deepOrange))),
     ]);
   }
