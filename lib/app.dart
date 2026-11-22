@@ -664,7 +664,21 @@ class _Ingredient {
   const _Ingredient(this.name, this.unit, this.pricePerUnit, {this.stockQuantity = 0, this.minimumStock = 0});
   final String name; final String unit; final double pricePerUnit; final double stockQuantity; final double minimumStock;
   Map<String, dynamic> toJson() => {'name': name, 'unit': unit, 'pricePerUnit': pricePerUnit, 'stockQuantity': stockQuantity, 'minimumStock': minimumStock};
-  factory _Ingredient.fromJson(Map<String, dynamic> j) => _Ingredient(j['name'] as String, j['unit'] as String, (j['pricePerUnit'] as num).toDouble(), stockQuantity: (j['stockQuantity'] as num? ?? 0).toDouble(), minimumStock: (j['minimumStock']class _DraftOrderLine {
+  factory _Ingredient.fromJson(Map<String, dynamic> j) => _Ingredient(j['name'] as String, j['unit'] as String, (j['pricePerUnit'] as num).toDouble(), stockQuantity: (j['stockQuantity'] as num? ?? 0).toDouble(), minimumStock: (j['minimumStock'] as num? ?? 0).toDouble());
+}
+class _RecipeLine {
+  _RecipeLine(this.ingredient, this.quantity);
+  String ingredient; double quantity;
+  Map<String, dynamic> toJson() => {'ingredient': ingredient, 'quantity': quantity};
+  factory _RecipeLine.fromJson(Map<String, dynamic> j) => _RecipeLine(j['ingredient'] as String, (j['quantity'] as num).toDouble());
+}
+class _Customer {
+  _Customer(this.name, this.phone, this.notes, this.created);
+  final String name; String phone; final String notes; final DateTime created;
+  Map<String, dynamic> toJson() => {'name': name, 'phone': phone, 'notes': notes, 'created': created.toIso8601String()};
+  factory _Customer.fromJson(Map<String, dynamic> j) => _Customer(j['name'] as String, (j['phone'] ?? '') as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String));
+}
+class _DraftOrderLine {
   _DraftOrderLine(this.product) : quantity = TextEditingController(text: '1');
   String product; final TextEditingController quantity;
   void dispose() => quantity.dispose();
@@ -686,13 +700,11 @@ class _Order {
   Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'lines': lines.map((e) => e.toJson()).toList(), 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted};
   factory _Order.fromJson(Map<String, dynamic> j) {
     final raw = j['lines'];
-    final lines = raw is List ? raw.map((e) => _OrderLine.fromJson(Map<String, dynamic>.from(e))).toList() : <_OrderLine>[_OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble())];
+    final lines = raw is List
+      ? raw.map((e) => _OrderLine.fromJson(Map<String, dynamic>.from(e))).toList()
+      : <_OrderLine>[_OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble())];
     return _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, lines, j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false);
   }
-}; final String payment; String status; final String notes; final DateTime created; bool stockDeducted;
-  double get total => quantity * unitPrice;
-  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'product': product, 'quantity': quantity, 'unitPrice': unitPrice, 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted};
-  factory _Order.fromJson(Map<String, dynamic> j) => _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble(), j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false);
 }
 class _FeatureTile extends StatelessWidget {
   const _FeatureTile({required this.icon, required this.title, required this.subtitle});
