@@ -240,7 +240,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage()];
+    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage(), _reportsPage()];
     return Scaffold(
       appBar: AppBar(title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('NOGUEIRA GESTÃO', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
@@ -260,6 +260,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
           NavigationDestination(icon: Icon(Icons.people_outline), label: 'Clientes'),
           NavigationDestination(icon: Icon(Icons.calculate_outlined), label: 'Custos'),
           NavigationDestination(icon: Icon(Icons.warehouse_outlined), label: 'Stock'),
+          NavigationDestination(icon: Icon(Icons.bar_chart_outlined), label: 'Relatórios'),
         ],
       ),
     );
@@ -279,6 +280,55 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     const _FeatureTile(icon: Icons.receipt_long, title: 'Encomendas e vendas', subtitle: 'Acompanhamento de pedidos'),
     const _FeatureTile(icon: Icons.warehouse_outlined, title: 'Stock', subtitle: 'Ingredientes e existências'),
   ]);
+
+
+  Widget _reportsPage() {
+    final completed = _orders.where((o) => o.status == 'Concluída').toList();
+    final pending = _orders.where((o) => o.status == 'Pendente' || o.status == 'Em preparação').toList();
+    final cancelled = _orders.where((o) => o.status == 'Cancelada').toList();
+    final now = DateTime.now();
+    final monthOrders = completed.where((o) => o.created.year == now.year && o.created.month == now.month).toList();
+    final revenue = completed.fold<double>(0, (s, o) => s + o.total);
+    final monthRevenue = monthOrders.fold<double>(0, (s, o) => s + o.total);
+    final pendingValue = pending.fold<double>(0, (s, o) => s + o.total);
+    final productNames = completed.map((o) => o.product).toSet().toList()..sort();
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Text('Relatórios', style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 4),
+      const Text('Resumo calculado a partir das encomendas registadas.'),
+      const SizedBox(height: 12),
+      GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), childAspectRatio: 1.65, crossAxisSpacing: 8, mainAxisSpacing: 8, children: [
+        _reportCard('Vendas concluídas', '€ ${revenue.toStringAsFixed(2)}', Icons.euro),
+        _reportCard('Este mês', '€ ${monthRevenue.toStringAsFixed(2)}', Icons.calendar_month),
+        _reportCard('Por concluir', '€ ${pendingValue.toStringAsFixed(2)}', Icons.pending_actions),
+        _reportCard('Encomendas concluídas', completed.length.toString(), Icons.check_circle_outline),
+      ]),
+      const SizedBox(height: 18),
+      Text('Vendas por produto', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 6),
+      if (completed.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Ainda não há vendas concluídas para apresentar.'))),
+      ...productNames.map((name) {
+        final items = completed.where((o) => o.product == name).toList();
+        final qty = items.fold<double>(0, (s, o) => s + o.quantity);
+        final total = items.fold<double>(0, (s, o) => s + o.total);
+        return Card(child: ListTile(title: Text(name), subtitle: Text('${qty.toStringAsFixed(0)} unidade(s) vendida(s)'), trailing: Text('€ ${total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold))));
+      }),
+      const SizedBox(height: 18),
+      Text('Estado das encomendas', style: Theme.of(context).textTheme.titleMedium),
+      Card(child: Column(children: [
+        ListTile(title: const Text('Pendentes / em preparação'), trailing: Text('${pending.length} · € ${pendingValue.toStringAsFixed(2)}')),
+        ListTile(title: const Text('Canceladas'), trailing: Text(cancelled.length.toString())),
+      ])),
+      const Padding(padding: EdgeInsets.only(top: 8), child: Text('Nota: a rentabilidade detalhada será estimada após integrar os custos das fichas técnicas em cada venda. Os valores acima são vendas brutas e não lucro líquido.', style: TextStyle(fontSize: 12, color: Colors.grey))),
+    ]);
+  }
+
+  Widget _reportCard(String label, String value, IconData icon) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+    Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
+    const SizedBox(height: 6),
+    Text(value, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
+    Text(label, style: const TextStyle(fontSize: 12), maxLines: 2),
+  ])));
 
   Widget _productList() => ListView(padding: const EdgeInsets.all(16), children: [
     Text('Catálogo de produtos', style: Theme.of(context).textTheme.titleLarge), const SizedBox(height: 8),
