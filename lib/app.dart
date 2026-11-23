@@ -29,6 +29,8 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   String _orderSearch = '';
   DateTime? _orderFrom;
   DateTime? _orderTo;
+  String _expenseCategoryFilter = 'Todas';
+  String _expenseMonthFilter = 'Todos';
 
   @override
   void initState() {
@@ -427,14 +429,14 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Importante: copie o conteúdo e cole num ficheiro para guardar no telemóvel ou computador. A restauração da cópia JSON substitui os dados atuais. Faça backups regularmente e guarde-os num local seguro.', style: TextStyle(fontSize: 12)))),
   ]);
 
-  Future<void> _openExpenseDialog() async {
-    final description = TextEditingController();
-    final amount = TextEditingController();
+  Future<void> _openExpenseDialog({_Expense? expense, int? index}) async {
+    final description = TextEditingController(text: expense?.description ?? '');
+    final amount = TextEditingController(text: expense?.amount.toStringAsFixed(2) ?? '');
     const categories = ['Ingredientes', 'Embalagens', 'Energia/água', 'Transporte/entregas', 'Renda', 'Equipamentos', 'Marketing', 'Impostos/taxas', 'Outros'];
-    String category = categories.first;
-    DateTime date = DateTime.now();
+    String category = expense?.category ?? categories.first;
+    DateTime date = expense?.date ?? DateTime.now();
     final result = await showDialog<_Expense>(context: context, builder: (c) => StatefulBuilder(builder: (c, refresh) => AlertDialog(
-      title: const Text('Registar despesa'),
+      title: Text(expense == null ? 'Registar despesa' : 'Editar despesa'),
       content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: description, decoration: const InputDecoration(labelText: 'Descrição')),
         TextField(controller: amount, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Valor (€)')),
@@ -448,7 +450,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     )));
     description.dispose(); amount.dispose();
     if (result == null || !mounted) return;
-    setState(() => _expenses.add(result));
+    setState(() { if (index == null) { _expenses.add(result); } else { _expenses[index] = result; } });
     await _saveExpenses();
   }
 
@@ -468,6 +470,13 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     final total = _expenses.fold<double>(0, (sum, e) => sum + e.amount);
     final now = DateTime.now();
     final month = _expenses.where((e) => e.date.year == now.year && e.date.month == now.month).fold<double>(0, (sum, e) => sum + e.amount);
+    final categories = ['Todas', 'Ingredientes', 'Embalagens', 'Energia/água', 'Transporte/entregas', 'Renda', 'Equipamentos', 'Marketing', 'Impostos/taxas', 'Outros'];
+    final months = _expenses.map((e) => '${e.date.year}-${e.date.month.toString().padLeft(2, '0')}').toSet().toList()..sort((a, b) => b.compareTo(a));
+    final visible = sorted.where((e) {
+      final categoryOk = _expenseCategoryFilter == 'Todas' || e.category == _expenseCategoryFilter;
+      final monthKey = '${e.date.year}-${e.date.month.toString().padLeft(2, '0')}';
+      return categoryOk && (_expenseMonthFilter == 'Todos' || monthKey == _expenseMonthFilter);
+    }).toList();
     return ListView(padding: const EdgeInsets.all(16), children: [
       Text('Despesas e fluxo de caixa', style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 6),
@@ -479,17 +488,38 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       ]),
       const SizedBox(height: 12),
       FilledButton.icon(onPressed: _openExpenseDialog, icon: const Icon(Icons.add), label: const Text('Registar despesa')),
+      const SizedBox(height: 16),
+      Text('Filtrar histórico', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 6),
+      Row(children: [
+        Expanded(child: DropdownButtonFormField<String>(
+          value: _expenseCategoryFilter,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Categoria', border: OutlineInputBorder()),
+          items: categories.map((v) => DropdownMenuItem(value: v, child: Text(v, overflow: TextOverflow.ellipsis))).toList(),
+          onChanged: (v) { if (v != null) setState(() => _expenseCategoryFilter = v); },
+        )),
+        const SizedBox(width: 8),
+        Expanded(child: DropdownButtonFormField<String>(
+          value: _expenseMonthFilter,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Mês', border: OutlineInputBorder()),
+          items: ['Todos', ...months].map((v) => DropdownMenuItem(value: v, child: Text(v == 'Todos' ? v : v.split('-').reversed.join('/')))).toList(),
+          onChanged: (v) { if (v != null) setState(() => _expenseMonthFilter = v); },
+        )),
+      ]),
       const SizedBox(height: 12),
-      Text('Histórico de despesas', style: Theme.of(context).textTheme.titleMedium),
-      if (sorted.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Ainda não existem despesas registadas.'))),
-      ...sorted.map((e) {
+      Text('Histórico de despesas · ${visible.length}', style: Theme.of(context).textTheme.titleMedium),
+      if (visible.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Não existem despesas para estes filtros.'))),
+      ...visible.map((e) {
         final originalIndex = _expenses.indexOf(e);
         return Card(child: ListTile(
           leading: const CircleAvatar(child: Icon(Icons.payments_outlined)),
           title: Text(e.description),
           subtitle: Text('${e.category} · ${e.date.day.toString().padLeft(2, '0')}/${e.date.month.toString().padLeft(2, '0')}/${e.date.year}'),
-          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          trailing: Wrap(spacing: 0, crossAxisAlignment: WrapCrossAlignment.center, children: [
             Text('€ ${e.amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            IconButton(tooltip: 'Editar', onPressed: () => _openExpenseDialog(expense: e, index: originalIndex), icon: const Icon(Icons.edit_outlined)),
             IconButton(tooltip: 'Apagar', onPressed: () => _deleteExpense(originalIndex), icon: const Icon(Icons.delete_outline)),
           ]),
         ));
