@@ -31,6 +31,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   DateTime? _orderTo;
   String _expenseCategoryFilter = 'Todas';
   String _expenseMonthFilter = 'Todos';
+  String _cashflowMonthFilter = 'Todos';
 
   @override
   void initState() {
@@ -254,7 +255,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage(), _reportsPage(), _backupPage(), _expensesPage()];
+    final pages = [_dashboard(), _productList(), _ordersPage(), _customersPage(), _costPage(), _stockPage(), _reportsPage(), _backupPage(), _expensesPage(), _cashflowPage()];
     return Scaffold(
       appBar: AppBar(title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('NOGUEIRA GESTÃO', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
@@ -277,6 +278,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
           NavigationDestination(icon: Icon(Icons.bar_chart_outlined), label: 'Relatórios'),
           NavigationDestination(icon: Icon(Icons.backup_outlined), label: 'Backup'),
           NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: 'Despesas'),
+          NavigationDestination(icon: Icon(Icons.swap_vert_circle_outlined), label: 'Fluxo caixa'),
         ],
       ),
     );
@@ -463,6 +465,55 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     if (ok != true || !mounted) return;
     setState(() => _expenses.removeAt(index));
     await _saveExpenses();
+  }
+
+  Widget _cashflowPage() {
+    final months = <String>{};
+    for (final o in _orders.where((e) => e.status == 'Concluída')) { months.add('${o.created.year}-${o.created.month.toString().padLeft(2, '0')}'); }
+    for (final e in _expenses) { months.add('${e.date.year}-${e.date.month.toString().padLeft(2, '0')}'); }
+    final ordered = months.toList()..sort((a, b) => b.compareTo(a));
+    final selected = _cashflowMonthFilter == 'Todos' ? (ordered.isEmpty ? '' : ordered.first) : _cashflowMonthFilter;
+    String key(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}';
+    double sales(String m) => _orders.where((o) => o.status == 'Concluída' && key(o.created) == m).fold<double>(0, (v, o) => v + o.total);
+    double received(String m) => _orders.where((o) => o.status == 'Concluída' && o.payment != 'Por pagar' && key(o.created) == m).fold<double>(0, (v, o) => v + o.total);
+    double pending(String m) => _orders.where((o) => o.status == 'Concluída' && o.payment == 'Por pagar' && key(o.created) == m).fold<double>(0, (v, o) => v + o.total);
+    double spent(String m) => _expenses.where((e) => key(e.date) == m).fold<double>(0, (v, e) => v + e.amount);
+    String eur(double v) => '€ ${v.toStringAsFixed(2)}';
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Text('Fluxo financeiro mensal', style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 6),
+      const Text('Entradas recebidas, despesas registadas e valores por receber.'),
+      const SizedBox(height: 12),
+      DropdownButtonFormField<String>(
+        value: ordered.contains(_cashflowMonthFilter) ? _cashflowMonthFilter : 'Todos',
+        decoration: const InputDecoration(labelText: 'Período', border: OutlineInputBorder()),
+        items: ['Todos', ...ordered].map((m) => DropdownMenuItem(value: m, child: Text(m == 'Todos' ? 'Último mês com registos' : m.split('-').reversed.join('/'))).toList(),
+        onChanged: (v) { if (v != null) setState(() => _cashflowMonthFilter = v); },
+      ),
+      if (selected.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), childAspectRatio: 1.65, crossAxisSpacing: 8, mainAxisSpacing: 8, children: [
+          _reportCard('Entradas recebidas', eur(received(selected)), Icons.south_west),
+          _reportCard('Despesas registadas', eur(spent(selected)), Icons.north_east),
+          _reportCard('Saldo do período', eur(received(selected) - spent(selected)), Icons.account_balance_wallet_outlined),
+          _reportCard('Vendas por receber', eur(pending(selected)), Icons.pending_actions),
+        ]),
+        const SizedBox(height: 8),
+        Text('Vendas concluídas: ${eur(sales(selected))}', style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 18),
+        Text('Evolução mensal', style: Theme.of(context).textTheme.titleMedium),
+        ...ordered.map((m) {
+          final income = received(m), expense = spent(m), balance = income - expense;
+          return Card(child: ListTile(
+            title: Text(m.split('-').reversed.join('/')),
+            subtitle: Text('Entradas: ${eur(income)} · Despesas: ${eur(expense)} · Por receber: ${eur(pending(m))}'),
+            trailing: Text(eur(balance), style: TextStyle(fontWeight: FontWeight.bold, color: balance >= 0 ? Colors.green : Colors.red)),
+          ));
+        }),
+      ] else
+        const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Ainda não existem vendas concluídas nem despesas registadas.'))),
+      const Padding(padding: EdgeInsets.only(top: 12), child: Text('Estimativa: encomendas concluídas com pagamento diferente de “Por pagar” são consideradas entradas, pela data da encomenda. Despesas são consideradas pela data registada. Não substitui a conciliação bancária nem a contabilidade.', style: TextStyle(fontSize: 12, color: Colors.grey))),
+    ]);
   }
 
   Widget _expensesPage() {
