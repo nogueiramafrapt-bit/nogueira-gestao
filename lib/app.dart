@@ -487,7 +487,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       DropdownButtonFormField<String>(
         value: ordered.contains(_cashflowMonthFilter) ? _cashflowMonthFilter : 'Todos',
         decoration: const InputDecoration(labelText: 'Período', border: OutlineInputBorder()),
-        items: ['Todos', ...ordered].map((m) => DropdownMenuItem(value: m, child: Text(m == 'Todos' ? 'Último mês com registos' : m.split('-').reversed.join('/'))).toList(),
+        items: ['Todos', ...ordered].map((m) => DropdownMenuItem<String>(value: m, child: Text(m == 'Todos' ? 'Último mês com registos' : m.split('-').reversed.join('/')))).toList(),
         onChanged: (v) { if (v != null) setState(() => _cashflowMonthFilter = v); },
       ),
       if (selected.isNotEmpty) ...[
