@@ -766,13 +766,34 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     name.dispose(); phone.dispose(); notes.dispose(); if (result == null || !mounted) return;
     setState(() { if (index == null) { _customers.add(result); } else { _customers[index] = result; } }); await _saveCustomers();
   }
+  Future<void> _showCustomerHistory(_Customer customer) async {
+    final orders = _orders.where((o) => o.customer.trim().toLowerCase() == customer.name.trim().toLowerCase()).toList()..sort((a, b) => b.created.compareTo(a.created));
+    final total = orders.fold<double>(0, (v, o) => v + o.total);
+    final paid = orders.fold<double>(0, (v, o) => v + o.paidTotal);
+    final balance = orders.fold<double>(0, (v, o) => v + (o.total - o.paidTotal).clamp(0, double.infinity));
+    String money(double v) => '€ ${v.toStringAsFixed(2)}';
+    await showDialog<void>(context: context, builder: (c) => AlertDialog(
+      title: Text('Histórico · ${customer.name}'),
+      content: SizedBox(width: 480, child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Wrap(spacing: 8, runSpacing: 8, children: [Chip(label: Text('Encomendas: ${orders.length}')), Chip(label: Text('Total: ${money(total)}')), Chip(label: Text('Recebido: ${money(paid)}')), Chip(label: Text('Em dívida: ${money(balance)}'))]),
+        const SizedBox(height: 12),
+        if (orders.isEmpty) const Text('Este cliente ainda não tem encomendas.'),
+        ...orders.map((o) => Card(child: Padding(padding: const EdgeInsets.all(10), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${o.created.day.toString().padLeft(2, '0')}/${o.created.month.toString().padLeft(2, '0')}/${o.created.year} · ${o.status}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(o.product), Text('Total: ${money(o.total)} · Recebido: ${money(o.paidTotal)} · Falta: ${money((o.total - o.paidTotal).clamp(0, double.infinity))}'),
+          if (o.payments.isNotEmpty) ...o.payments.map((p) => Text('Recebimento ${p.date.day.toString().padLeft(2, '0')}/${p.date.month.toString().padLeft(2, '0')}/${p.date.year} · ${p.method}: ${money(p.amount)}', style: const TextStyle(fontSize: 12))),
+        ])))),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Fechar'))],
+    ));
+  }
   Widget _customersPage() => ListView(padding: const EdgeInsets.all(16), children: [
     TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Pesquisar cliente por nome ou telefone', border: OutlineInputBorder()), onChanged: (v) => setState(() => _customerSearch = v.trim().toLowerCase())),
     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text('Carteira de clientes', style: Theme.of(context).textTheme.titleLarge)), FilledButton.icon(onPressed: () => _editCustomer(), icon: const Icon(Icons.person_add_alt_1), label: const Text('Novo'))]),
     const SizedBox(height: 10),
     Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('${_customers.length} clientes registados', style: const TextStyle(fontWeight: FontWeight.bold)))),
     if (_customers.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('Os clientes serão adicionados automaticamente ao registar encomendas. Também pode adicioná-los manualmente.')),
-    ..._customers.asMap().entries.where((entry) => entry.value.name.toLowerCase().contains(_customerSearch) || entry.value.phone.toLowerCase().contains(_customerSearch)).map((entry) { final i = entry.key; final customer = entry.value; return Card(child: ListTile(leading: const CircleAvatar(child: Icon(Icons.person_outline)), title: Text(customer.name), subtitle: Text([if (customer.phone.isNotEmpty) customer.phone, if (customer.notes.isNotEmpty) customer.notes].join(' · ')), trailing: PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') await _editCustomer(customer: customer, index: i); if (v == 'delete') { setState(() => _customers.removeAt(i)); await _saveCustomers(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Editar')), PopupMenuItem(value: 'delete', child: Text('Apagar'))]))); }),
+    ..._customers.asMap().entries.where((entry) => entry.value.name.toLowerCase().contains(_customerSearch) || entry.value.phone.toLowerCase().contains(_customerSearch)).map((entry) { final i = entry.key; final customer = entry.value; return Card(child: ListTile(onTap: () => _showCustomerHistory(customer), leading: const CircleAvatar(child: Icon(Icons.person_outline)), title: Text(customer.name), subtitle: Text([if (customer.phone.isNotEmpty) customer.phone, if (customer.notes.isNotEmpty) customer.notes, 'Toque para ver histórico e saldo'].join(' · ')), trailing: PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') await _editCustomer(customer: customer, index: i); if (v == 'delete') { setState(() => _customers.removeAt(i)); await _saveCustomers(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Editar')), PopupMenuItem(value: 'delete', child: Text('Apagar'))]))); }),
   ]);
   Future<void> _changeOrderStatus(_Order order, String status) async {
     final i = _orders.indexOf(order);
