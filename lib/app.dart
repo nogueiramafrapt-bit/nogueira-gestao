@@ -787,14 +787,20 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Fechar'))],
     ));
   }
-  Widget _customersPage() => ListView(padding: const EdgeInsets.all(16), children: [
+  double _customerBalance(_Customer customer) => _orders.where((o) => o.customer.trim().toLowerCase() == customer.name.trim().toLowerCase()).fold<double>(0, (sum, o) => sum + (o.total - o.paidTotal).clamp(0, double.infinity));
+  Widget _customersPage() {
+    final visibleCustomers = _customers.where((c) => c.name.toLowerCase().contains(_customerSearch) || c.phone.toLowerCase().contains(_customerSearch)).toList()..sort((a, b) => _customerBalance(b).compareTo(_customerBalance(a)));
+    final debtors = _customers.where((c) => _customerBalance(c) > 0.009).length;
+    final outstanding = _customers.fold<double>(0, (sum, c) => sum + _customerBalance(c));
+    return ListView(padding: const EdgeInsets.all(16), children: [
     TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Pesquisar cliente por nome ou telefone', border: OutlineInputBorder()), onChanged: (v) => setState(() => _customerSearch = v.trim().toLowerCase())),
     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text('Carteira de clientes', style: Theme.of(context).textTheme.titleLarge)), FilledButton.icon(onPressed: () => _editCustomer(), icon: const Icon(Icons.person_add_alt_1), label: const Text('Novo'))]),
     const SizedBox(height: 10),
-    Card(child: Padding(padding: const EdgeInsets.all(14), child: Text('${_customers.length} clientes registados', style: const TextStyle(fontWeight: FontWeight.bold)))),
+    Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${_customers.length} clientes registados', style: const TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), Wrap(spacing: 18, runSpacing: 6, children: [Text('Clientes com dívida: $debtors'), Text('Total em aberto: € ${outstanding.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red))])]))),
     if (_customers.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('Os clientes serão adicionados automaticamente ao registar encomendas. Também pode adicioná-los manualmente.')),
-    ..._customers.asMap().entries.where((entry) => entry.value.name.toLowerCase().contains(_customerSearch) || entry.value.phone.toLowerCase().contains(_customerSearch)).map((entry) { final i = entry.key; final customer = entry.value; return Card(child: ListTile(onTap: () => _showCustomerHistory(customer), leading: const CircleAvatar(child: Icon(Icons.person_outline)), title: Text(customer.name), subtitle: Text([if (customer.phone.isNotEmpty) customer.phone, if (customer.notes.isNotEmpty) customer.notes, 'Toque para ver histórico e saldo'].join(' · ')), trailing: PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') await _editCustomer(customer: customer, index: i); if (v == 'delete') { setState(() => _customers.removeAt(i)); await _saveCustomers(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Editar')), PopupMenuItem(value: 'delete', child: Text('Apagar'))]))); }),
+    ...visibleCustomers.map((customer) { final i = _customers.indexOf(customer); final balance = _customerBalance(customer); return Card(child: ListTile(onTap: () => _showCustomerHistory(customer), leading: CircleAvatar(child: Icon(balance > 0.009 ? Icons.account_balance_wallet_outlined : Icons.person_outline, color: balance > 0.009 ? Colors.red : null)), title: Text(customer.name), subtitle: Text([if (customer.phone.isNotEmpty) customer.phone, if (customer.notes.isNotEmpty) customer.notes, 'Toque para ver histórico e saldo'].join(' · ')), trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [Text('€ ${balance.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, color: balance > 0.009 ? Colors.red : Colors.green)), PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') await _editCustomer(customer: customer, index: i); if (v == 'delete') { setState(() => _customers.removeAt(i)); await _saveCustomers(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Editar')), PopupMenuItem(value: 'delete', child: Text('Apagar'))])]))); }),
   ]);
+  }
   Future<void> _changeOrderStatus(_Order order, String status) async {
     final i = _orders.indexOf(order);
     if (i < 0 || order.status == status) return;
