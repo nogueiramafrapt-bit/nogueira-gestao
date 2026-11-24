@@ -315,10 +315,11 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   String _ordersCsv() {
     String cell(Object? value) => '"${(value ?? '').toString().replaceAll('"', '""')}"';
     final rows = <List<String>>[
-      ['Data', 'Cliente', 'Telefone', 'Produto', 'Quantidade', 'Preço unitário (€)', 'Total (€)', 'Pagamento', 'Estado', 'Observações'],
+      ['Data', 'Cliente', 'Telefone', 'Produto', 'Quantidade', 'Preço unitário (€)', 'Total (€)', 'Recebido (€)', 'Em falta (€)', 'Pagamento', 'Estado', 'Observações'],
       ..._orders.map((o) => [
         o.created.toIso8601String(), o.customer, o.phone, o.product,
         o.quantity.toString(), o.unitPrice.toStringAsFixed(2), o.total.toStringAsFixed(2),
+        o.paidTotal.toStringAsFixed(2), (o.total - o.paidTotal).clamp(0, double.infinity).toStringAsFixed(2),
         o.payment, o.status, o.notes,
       ]),
     ];
@@ -873,7 +874,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       if (o.notes.isNotEmpty) Text('Obs.: ' + o.notes),
       Text('Recebido: € ${o.paidTotal.toStringAsFixed(2)} · Em falta: € ${(o.total - o.paidTotal).clamp(0, double.infinity).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w600)),
       if (o.total - o.paidTotal > 0.009) Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => _registerPayment(o), icon: const Icon(Icons.payments_outlined), label: const Text('Registar pagamento'))),
-      if (o.payments.isNotEmpty) ...o.payments.map((p) => Padding(padding: const EdgeInsets.only(left: 8, top: 2), child: Text('• ${p.date.day.toString().padLeft(2, '0')}/${p.date.month.toString().padLeft(2, '0')}/${p.date.year} · ${p.method}: € ${p.amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.grey)))),
+      if (o.payments.isNotEmpty) ...o.payments.asMap().entries.map((entry) { final paymentIndex = entry.key; final p = entry.value; return Padding(padding: const EdgeInsets.only(left: 8, top: 2), child: Row(children: [Expanded(child: Text('• ${p.date.day.toString().padLeft(2, '0')}/${p.date.month.toString().padLeft(2, '0')}/${p.date.year} · ${p.method}: € ${p.amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.grey))), IconButton(tooltip: 'Anular recebimento', visualDensity: VisualDensity.compact, iconSize: 18, onPressed: () async { final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text('Anular recebimento?'), content: Text('Remover o recebimento de € ${p.amount.toStringAsFixed(2)}?'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Manter')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Anular'))])); if (ok == true && mounted) { setState(() => o.payments.removeAt(paymentIndex)); await _saveOrders(); } }, icon: const Icon(Icons.delete_outline))])); }),
       Row(children: [const Text('Estado: '), DropdownButton<String>(value: o.status, items: const ['Pendente','Em preparação','Concluída','Cancelada'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) _changeOrderStatus(o, v); }), const Spacer(), IconButton(onPressed: () async { setState(() => _orders.remove(o)); await _saveOrders(); }, icon: const Icon(Icons.delete_outline))]),
     ]))))
   ]);
