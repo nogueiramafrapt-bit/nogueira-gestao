@@ -469,14 +469,14 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
 
   Widget _cashflowPage() {
     final months = <String>{};
-    for (final o in _orders.where((e) => e.status == 'Concluída')) { months.add('${o.created.year}-${o.created.month.toString().padLeft(2, '0')}'); }
+    for (final o in _orders.where((e) => e.status == 'Concluída')) { months.add('${o.created.year}-${o.created.month.toString().padLeft(2, '0')}'); for (final p in o.payments) { months.add('${p.date.year}-${p.date.month.toString().padLeft(2, '0')}'); } }
     for (final e in _expenses) { months.add('${e.date.year}-${e.date.month.toString().padLeft(2, '0')}'); }
     final ordered = months.toList()..sort((a, b) => b.compareTo(a));
     final selected = _cashflowMonthFilter == 'Todos' ? (ordered.isEmpty ? '' : ordered.first) : _cashflowMonthFilter;
     String key(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}';
     double sales(String m) => _orders.where((o) => o.status == 'Concluída' && key(o.created) == m).fold<double>(0, (v, o) => v + o.total);
-    double received(String m) => _orders.where((o) => o.status == 'Concluída' && o.payment != 'Por pagar' && key(o.created) == m).fold<double>(0, (v, o) => v + o.total);
-    double pending(String m) => _orders.where((o) => o.status == 'Concluída' && o.payment == 'Por pagar' && key(o.created) == m).fold<double>(0, (v, o) => v + o.total);
+    double received(String m) => _orders.where((o) => o.status == 'Concluída').fold<double>(0, (v, o) => v + (o.payments.isEmpty ? (o.payment != 'Por pagar' && key(o.created) == m ? o.total : 0) : o.payments.where((p) => key(p.date) == m).fold<double>(0, (a, p) => a + p.amount)));
+    double pending(String m) => _orders.where((o) => o.status == 'Concluída' && key(o.created) == m).fold<double>(0, (v, o) => v + (o.total - o.paidTotal).clamp(0, double.infinity));
     double spent(String m) => _expenses.where((e) => key(e.date) == m).fold<double>(0, (v, e) => v + e.amount);
     String eur(double v) => '€ ${v.toStringAsFixed(2)}';
     return ListView(padding: const EdgeInsets.all(16), children: [
@@ -814,6 +814,26 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     }
     await _saveOrders();
   }
+  Future<void> _registerPayment(_Order order) async {
+    final amount = TextEditingController();
+    String method = 'MBWay';
+    DateTime date = DateTime.now();
+    final remaining = order.total - order.paidTotal;
+    final result = await showDialog<_PaymentEntry>(context: context, builder: (c) => StatefulBuilder(builder: (c, refresh) => AlertDialog(
+      title: const Text('Registar recebimento'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Em falta: € ${remaining.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+        TextField(controller: amount, autofocus: true, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Valor recebido (€)')),
+        DropdownButtonFormField<String>(value: method, decoration: const InputDecoration(labelText: 'Método'), items: const ['Dinheiro','MBWay','Transferência','Outro'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) refresh(() => method = v); }),
+        ListTile(contentPadding: EdgeInsets.zero, title: Text('Data: ${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}'), trailing: IconButton(icon: const Icon(Icons.calendar_month), onPressed: () async { final picked = await showDatePicker(context: c, initialDate: date, firstDate: DateTime(2020), lastDate: DateTime(2100)); if (picked != null) refresh(() => date = picked); })),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')), FilledButton(onPressed: () { final v = double.tryParse(amount.text.trim().replaceAll(',', '.')); if (v == null || v <= 0 || v > remaining + 0.001) return; Navigator.pop(c, _PaymentEntry(v, method, date)); }, child: const Text('Guardar'))],
+    )));
+    amount.dispose();
+    if (result == null || !mounted) return;
+    setState(() { order.payments.add(result); });
+    await _saveOrders();
+  }
   Future<void> _pickOrderDate(bool from) async {
     final picked = await showDatePicker(context: context, initialDate: (from ? _orderFrom : _orderTo) ?? DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2100));
     if (picked != null) setState(() { if (from) { _orderFrom = picked; } else { _orderTo = picked; } });
@@ -851,6 +871,9 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       if (o.dueDate != null) Text('Prazo de entrega: '+o.dueDate!.day.toString().padLeft(2, '0')+'/'+o.dueDate!.month.toString().padLeft(2, '0')+'/'+o.dueDate!.year.toString(), style: const TextStyle(fontWeight: FontWeight.w600)),
       Text(o.created.day.toString().padLeft(2, '0') + '/' + o.created.month.toString().padLeft(2, '0') + '/' + o.created.year.toString() + ' · ' + o.payment),
       if (o.notes.isNotEmpty) Text('Obs.: ' + o.notes),
+      Text('Recebido: € ${o.paidTotal.toStringAsFixed(2)} · Em falta: € ${(o.total - o.paidTotal).clamp(0, double.infinity).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+      if (o.total - o.paidTotal > 0.009) Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => _registerPayment(o), icon: const Icon(Icons.payments_outlined), label: const Text('Registar pagamento'))),
+      if (o.payments.isNotEmpty) ...o.payments.map((p) => Padding(padding: const EdgeInsets.only(left: 8, top: 2), child: Text('• ${p.date.day.toString().padLeft(2, '0')}/${p.date.month.toString().padLeft(2, '0')}/${p.date.year} · ${p.method}: € ${p.amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.grey)))),
       Row(children: [const Text('Estado: '), DropdownButton<String>(value: o.status, items: const ['Pendente','Em preparação','Concluída','Cancelada'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) _changeOrderStatus(o, v); }), const Spacer(), IconButton(onPressed: () async { setState(() => _orders.remove(o)); await _saveOrders(); }, icon: const Icon(Icons.delete_outline))]),
     ]))))
   ]);
@@ -945,20 +968,27 @@ class _OrderLine {
   factory _OrderLine.fromJson(Map<String, dynamic> j) => _OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble());
 }
 class _Order {
-  _Order(this.id, this.customer, this.phone, this.lines, this.payment, this.status, this.notes, this.created, {this.stockDeducted = false, this.dueDate});
-  final String id, customer, phone; final List<_OrderLine> lines; final String payment; String status; final String notes; final DateTime created; bool stockDeducted; final DateTime? dueDate;
+  _Order(this.id, this.customer, this.phone, this.lines, this.payment, this.status, this.notes, this.created, {this.stockDeducted = false, this.dueDate, List<_PaymentEntry>? payments}) : payments = payments ?? [];
+  final String id, customer, phone; final List<_OrderLine> lines; final String payment; String status; final String notes; final DateTime created; bool stockDeducted; final DateTime? dueDate; final List<_PaymentEntry> payments;
+  double get paidTotal => payments.isNotEmpty ? payments.fold<double>(0, (s, p) => s + p.amount) : (payment != 'Por pagar' ? total : 0);
   String get product => lines.map((e) => e.product).join(', ');
   double get quantity => lines.fold(0, (s, e) => s + e.quantity);
   double get unitPrice => lines.isEmpty ? 0 : lines.first.unitPrice;
   double get total => lines.fold(0, (s, e) => s + e.total);
-  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'lines': lines.map((e) => e.toJson()).toList(), 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted, 'dueDate': dueDate?.toIso8601String()};
+  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'lines': lines.map((e) => e.toJson()).toList(), 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted, 'dueDate': dueDate?.toIso8601String(), 'payments': payments.map((p) => p.toJson()).toList()};
   factory _Order.fromJson(Map<String, dynamic> j) {
     final raw = j['lines'];
     final lines = raw is List
       ? raw.map((e) => _OrderLine.fromJson(Map<String, dynamic>.from(e))).toList()
       : <_OrderLine>[_OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble())];
-    return _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, lines, j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false, dueDate: j['dueDate'] == null ? null : DateTime.tryParse(j['dueDate'] as String));
+    return _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, lines, j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false, dueDate: j['dueDate'] == null ? null : DateTime.tryParse(j['dueDate'] as String), payments: (j['payments'] as List? ?? []).map((e) => _PaymentEntry.fromJson(Map<String, dynamic>.from(e))).toList());
   }
+}
+class _PaymentEntry {
+  _PaymentEntry(this.amount, this.method, this.date);
+  final double amount; final String method; final DateTime date;
+  Map<String, dynamic> toJson() => {'amount': amount, 'method': method, 'date': date.toIso8601String()};
+  factory _PaymentEntry.fromJson(Map<String, dynamic> j) => _PaymentEntry((j['amount'] as num).toDouble(), j['method'] as String, DateTime.parse(j['date'] as String));
 }
 class _FeatureTile extends StatelessWidget {
   const _FeatureTile({required this.icon, required this.title, required this.subtitle});
