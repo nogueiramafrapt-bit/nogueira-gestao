@@ -580,6 +580,24 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
   }
 
   Widget _reportsPage() {
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final sevenDays = todayDate.add(const Duration(days: 7));
+    final receivables = _orders.where((o) => o.status != 'Cancelada' && (o.total - o.paidTotal) > 0.009).toList()
+      ..sort((a, b) {
+        final ad = a.paymentDueDate ?? DateTime(9999);
+        final bd = b.paymentDueDate ?? DateTime(9999);
+        return ad.compareTo(bd);
+      });
+    final overdue = receivables.where((o) => o.paymentDueDate != null && DateTime(o.paymentDueDate!.year, o.paymentDueDate!.month, o.paymentDueDate!.day).isBefore(todayDate)).toList();
+    final dueSoon = receivables.where((o) {
+      if (o.paymentDueDate == null) return false;
+      final d = DateTime(o.paymentDueDate!.year, o.paymentDueDate!.month, o.paymentDueDate!.day);
+      return !d.isBefore(todayDate) && !d.isAfter(sevenDays);
+    }).toList();
+    final noDate = receivables.where((o) => o.paymentDueDate == null).toList();
+    double balanceOf(_Order o) => (o.total - o.paidTotal).clamp(0, double.infinity).toDouble();
+    double balanceSum(List<_Order> list) => list.fold<double>(0, (sum, o) => sum + balanceOf(o));
     final completed = _orders.where((o) => o.status == 'Concluída').toList();
     final pending = _orders.where((o) => o.status == 'Pendente' || o.status == 'Em preparação').toList();
     final cancelled = _orders.where((o) => o.status == 'Cancelada').toList();
@@ -625,6 +643,29 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
       const SizedBox(height: 4),
       const Text('Resumo calculado a partir das encomendas registadas.'),
       const SizedBox(height: 12),
+      Text('Relatório de cobranças', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 6),
+      const Text('Considera apenas valores ainda por receber. A data limite de pagamento é independente do prazo de entrega.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+      const SizedBox(height: 8),
+      GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), childAspectRatio: 1.65, crossAxisSpacing: 8, mainAxisSpacing: 8, children: [
+        _reportCard('Em atraso', '€ ${balanceSum(overdue).toStringAsFixed(2)}', Icons.warning_amber_outlined),
+        _reportCard('A vencer (7 dias)', '€ ${balanceSum(dueSoon).toStringAsFixed(2)}', Icons.event_available_outlined),
+        _reportCard('Sem data definida', '€ ${balanceSum(noDate).toStringAsFixed(2)}', Icons.event_busy_outlined),
+        _reportCard('Total por receber', '€ ${balanceSum(receivables).toStringAsFixed(2)}', Icons.account_balance_wallet_outlined),
+      ]),
+      const SizedBox(height: 8),
+      if (receivables.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(12), child: Text('Não existem valores em aberto.'))),
+      ...receivables.map((o) {
+        final d = o.paymentDueDate;
+        final dateLabel = d == null ? 'Sem data definida' : 'Pagamento até ${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+        return Card(child: ListTile(
+          leading: Icon(d != null && DateTime(d.year, d.month, d.day).isBefore(todayDate) ? Icons.warning_amber : Icons.payments_outlined, color: d != null && DateTime(d.year, d.month, d.day).isBefore(todayDate) ? Colors.red : null),
+          title: Text(o.customer),
+          subtitle: Text('Encomenda #${o.id} · $dateLabel · Recebido € ${o.paidTotal.toStringAsFixed(2)}'),
+          trailing: Text('€ ${balanceOf(o).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+        ));
+      }),
+      const SizedBox(height: 18),
       GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), childAspectRatio: 1.65, crossAxisSpacing: 8, mainAxisSpacing: 8, children: [
         _reportCard('Vendas concluídas', '€ ${revenue.toStringAsFixed(2)}', Icons.euro),
         _reportCard('Este mês', '€ ${monthRevenue.toStringAsFixed(2)}', Icons.calendar_month),
@@ -723,6 +764,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
     final customer = TextEditingController(); final phone = TextEditingController(); final notes = TextEditingController();
     final drafts = <_DraftOrderLine>[_DraftOrderLine(_products.first.name)];
     DateTime? dueDate;
+    DateTime? paymentDueDate;
     String payment = 'Por pagar';
     final result = await showDialog<_Order>(context: context, builder: (c) => StatefulBuilder(builder: (c, refresh) => AlertDialog(
       title: const Text('Nova encomenda'),
@@ -740,6 +782,10 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
         }),
         Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => refresh(() => drafts.add(_DraftOrderLine(_products.first.name))), icon: const Icon(Icons.add), label: const Text('Adicionar produto'))),
         ListTile(contentPadding: EdgeInsets.zero, leading: const Icon(Icons.event), title: Text(dueDate == null ? 'Prazo de entrega: não definido' : 'Entrega: '+dueDate!.day.toString().padLeft(2, '0')+'/'+dueDate!.month.toString().padLeft(2, '0')+'/'+dueDate!.year.toString()), trailing: IconButton(icon: const Icon(Icons.calendar_month), onPressed: () async { final picked = await showDatePicker(context: c, initialDate: dueDate ?? DateTime.now(), firstDate: DateTime.now().subtract(const Duration(days: 365)), lastDate: DateTime.now().add(const Duration(days: 730))); if (picked != null) refresh(() => dueDate = picked); })),
+        ListTile(contentPadding: EdgeInsets.zero, leading: const Icon(Icons.payments_outlined), title: Text(paymentDueDate == null ? 'Data limite de pagamento: não definida' : 'Pagar até: '+paymentDueDate!.day.toString().padLeft(2, '0')+'/'+paymentDueDate!.month.toString().padLeft(2, '0')+'/'+paymentDueDate!.year.toString()), trailing: Wrap(mainAxisSize: MainAxisSize.min, children: [
+          if (paymentDueDate != null) IconButton(tooltip: 'Limpar data', icon: const Icon(Icons.clear), onPressed: () => refresh(() => paymentDueDate = null)),
+          IconButton(icon: const Icon(Icons.calendar_month), onPressed: () async { final picked = await showDatePicker(context: c, initialDate: paymentDueDate ?? DateTime.now(), firstDate: DateTime.now().subtract(const Duration(days: 3650)), lastDate: DateTime.now().add(const Duration(days: 3650))); if (picked != null) refresh(() => paymentDueDate = picked); }),
+        ])),
         DropdownButtonFormField<String>(value: payment, decoration: const InputDecoration(labelText: 'Pagamento'), items: const ['Por pagar','Dinheiro','MBWay','Transferência'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) { if (v != null) refresh(() => payment = v); }),
         TextField(controller: notes, maxLines: 2, decoration: const InputDecoration(labelText: 'Observações')),
       ]))),
@@ -752,7 +798,7 @@ class _NogueiraHomePageState extends State<NogueiraHomePage> {
           lines.add(_OrderLine(product.name, q, product.price));
         }
         if (customer.text.trim().isEmpty) return;
-        Navigator.pop(c, _Order(DateTime.now().millisecondsSinceEpoch.toString(), customer.text.trim(), phone.text.trim(), lines, payment, 'Pendente', notes.text.trim(), DateTime.now(), dueDate: dueDate));
+        Navigator.pop(c, _Order(DateTime.now().millisecondsSinceEpoch.toString(), customer.text.trim(), phone.text.trim(), lines, payment, 'Pendente', notes.text.trim(), DateTime.now(), dueDate: dueDate, paymentDueDate: paymentDueDate));
       }, child: const Text('Guardar encomenda'))],
     )));
     customer.dispose(); phone.dispose(); notes.dispose(); for (final draft in drafts) { draft.dispose(); }
@@ -996,20 +1042,20 @@ class _OrderLine {
   factory _OrderLine.fromJson(Map<String, dynamic> j) => _OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble());
 }
 class _Order {
-  _Order(this.id, this.customer, this.phone, this.lines, this.payment, this.status, this.notes, this.created, {this.stockDeducted = false, this.dueDate, List<_PaymentEntry>? payments}) : payments = payments ?? [];
-  final String id, customer, phone; final List<_OrderLine> lines; final String payment; String status; final String notes; final DateTime created; bool stockDeducted; final DateTime? dueDate; final List<_PaymentEntry> payments;
+  _Order(this.id, this.customer, this.phone, this.lines, this.payment, this.status, this.notes, this.created, {this.stockDeducted = false, this.dueDate, this.paymentDueDate, List<_PaymentEntry>? payments}) : payments = payments ?? [];
+  final String id, customer, phone; final List<_OrderLine> lines; final String payment; String status; final String notes; final DateTime created; bool stockDeducted; final DateTime? dueDate; final DateTime? paymentDueDate; final List<_PaymentEntry> payments;
   double get paidTotal => payments.isNotEmpty ? payments.fold<double>(0, (s, p) => s + p.amount) : (payment != 'Por pagar' ? total : 0);
   String get product => lines.map((e) => e.product).join(', ');
   double get quantity => lines.fold(0, (s, e) => s + e.quantity);
   double get unitPrice => lines.isEmpty ? 0 : lines.first.unitPrice;
   double get total => lines.fold(0, (s, e) => s + e.total);
-  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'lines': lines.map((e) => e.toJson()).toList(), 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted, 'dueDate': dueDate?.toIso8601String(), 'payments': payments.map((p) => p.toJson()).toList()};
+  Map<String, dynamic> toJson() => {'id': id, 'customer': customer, 'phone': phone, 'lines': lines.map((e) => e.toJson()).toList(), 'payment': payment, 'status': status, 'notes': notes, 'created': created.toIso8601String(), 'stockDeducted': stockDeducted, 'dueDate': dueDate?.toIso8601String(), 'paymentDueDate': paymentDueDate?.toIso8601String(), 'payments': payments.map((p) => p.toJson()).toList()};
   factory _Order.fromJson(Map<String, dynamic> j) {
     final raw = j['lines'];
     final lines = raw is List
       ? raw.map((e) => _OrderLine.fromJson(Map<String, dynamic>.from(e))).toList()
       : <_OrderLine>[_OrderLine(j['product'] as String, (j['quantity'] as num).toDouble(), (j['unitPrice'] as num).toDouble())];
-    return _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, lines, j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false, dueDate: j['dueDate'] == null ? null : DateTime.tryParse(j['dueDate'] as String), payments: (j['payments'] as List? ?? []).map((e) => _PaymentEntry.fromJson(Map<String, dynamic>.from(e))).toList());
+    return _Order(j['id'] as String, j['customer'] as String, (j['phone'] ?? '') as String, lines, j['payment'] as String, j['status'] as String, (j['notes'] ?? '') as String, DateTime.parse(j['created'] as String), stockDeducted: (j['stockDeducted'] as bool?) ?? false, dueDate: j['dueDate'] == null ? null : DateTime.tryParse(j['dueDate'] as String), paymentDueDate: j['paymentDueDate'] == null ? null : DateTime.tryParse(j['paymentDueDate'] as String), payments: (j['payments'] as List? ?? []).map((e) => _PaymentEntry.fromJson(Map<String, dynamic>.from(e))).toList());
   }
 }
 class _PaymentEntry {
